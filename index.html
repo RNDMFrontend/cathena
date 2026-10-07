@@ -331,6 +331,9 @@ body.is-desk .sheet .panel { border-radius: 24px; }
 .su-act input { width: 110px; border: 1px solid var(--line); background: var(--s1); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: 700 1rem var(--f-body); }
 .su-act .btn { padding: 10px 16px; }
 .su-act .btn.go { background: var(--bull); color: #04211c; }
+.su-quick { display: flex; gap: 6px; width: 100%; }
+.su-after { width: 100%; margin: 0; font-size: .78rem; color: var(--ink3, var(--ink2)); }
+.su-why { display: block; margin-bottom: 6px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--lev) 14%, var(--s2)); border: 1px solid color-mix(in srgb, var(--lev) 35%, transparent); color: var(--ink); font-weight: 600; }
 .su-err { color: var(--bear); font-size: .82rem; margin-top: 8px; }
 .su-ok { color: var(--bull); font-size: .82rem; margin-top: 8px; }
 .su-foot { display: grid; gap: 8px; font-size: .8rem; color: var(--ink3); text-align: center; }
@@ -425,6 +428,7 @@ body.is-desk .sheet .panel { border-radius: 24px; }
 .dnav a:hover { color: var(--ink); }
 .dnav a .ic { color: var(--vol); }
 .stake-avail { font-size: .76rem; color: var(--ink3); margin-top: 2px; }
+.amt-top { border-style: dashed; color: var(--bull); }
 .amt-dep { background: var(--bull) !important; color: #04211c !important; border-color: transparent !important; font-family: var(--f-body) !important; font-weight: 800; }
 .su-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dt-connect { border: 0; border-radius: 12px; padding: 11px 18px; font: 800 .95rem var(--f-body); cursor: pointer; color: #04211c; background: linear-gradient(180deg, color-mix(in srgb, var(--bull) 78%, #fff), var(--bull) 55%); box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 10px 26px -12px var(--bull); }
@@ -623,7 +627,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
     <div class="dt-tag"><b>Options, made easy.</b><span>One slider · max loss shown upfront · cash out any time</span></div>
     <div class="dt-right">
       <button class="dt-connect" id="dConnect" hidden>Connect wallet</button>
-      <div class="dt-bal"><b class="mono" id="dCash">$0.00</b><span>cash · <a id="dDeposit">Deposit</a></span></div>
+      <div class="dt-bal"><b class="mono" id="dCash">$0.00</b><span>cash · <a id="dDeposit">Top up</a></span></div>
       <div class="dt-bal"><b class="mono" id="dEq">$0.00</b><span class="mono" id="dPnl">today</span></div>
       <img src="/assets/cathena-logo-160.png" class="dt-avatar" alt="Account">
     </div>
@@ -930,7 +934,7 @@ function render() {
   const lim = stakeLimit(), broke = lim && lim.max < 10;
   if (lim && state.C < 10 && lim.max >= 10) state.C = Math.min(lim.max, 20);    // just funded: start from a stake that can trade
   renderStakeChips();                                                          // clamps the stake to what you have
-  if (lim && !broke) { const need = minTradable(state.s); if (need && state.C < need && lim.max >= need) { state.C = need; renderStakeChips(); } }
+  if (lim && !broke) { const need = stakeNeed(state.s); if (need && state.C < need && lim.max >= need) { state.C = need; renderStakeChips(); } }
   const { s, C } = state, Lp = riskPct(s), tq = tradableQuote(s, C), q = tq.q;
   document.documentElement.style.setProperty("--side", s < 0 ? "var(--bear)" : "var(--bull)");
   if (document.activeElement !== $("slider") || +$("slider").value !== s) $("slider").value = s;
@@ -947,7 +951,7 @@ function render() {
   // scenario pin follows the side
   if (state.move !== null) state.pin = S * (1 + (s < 0 ? -1 : 1) * state.move);
   drawMarks(); renderHero(q);
-  if (tq.short && lim) $("heroSub").textContent += ` · deposit ${usd(Math.ceil(tq.need - lim.free))} more to place it`;
+  if (tq.short && lim) $("heroSub").textContent += " · " + needText(s);
   if (!q) { animateTo(seriesFor(null), null); $("holdLegend").innerHTML = ""; ["mixBin", "mixSyn", "mixCash"].forEach(i => $(i).style.width = "0%"); $("warnLine").hidden = true; tweenText("stLoss", 0, () => "—"); tweenText("stSafe", 0, () => "—"); tweenText("stLev", 0, () => "—"); return; }
   tweenText("stLoss", -q.maxLoss, x => money(x));
   tweenText("stSafe", q.C - q.maxLoss, x => usd(x));
@@ -1111,6 +1115,24 @@ $("slider").addEventListener("input", () => { let v = +$("slider").value; if (Ma
 // when your stake (or balance) is under what a setting needs, preview it at the smallest stake that trades
 // Hyperliquid's $10 order minimum for signed-in accounts; the demo is paper money and takes any stake
 const minOrder = () => (typeof SETUP !== "undefined" && SETUP && SETUP.signed_in) ? 10 : 0;
+// Moonshot is all binary, and $10 of it lands just under Hyperliquid's $10 minimum at the mid price (server: MOONSHOT_MIN_USD)
+const MOON_MIN = 11;
+const stakeFloor = s => minOrder() ? (Math.abs(s) >= ALL_IN ? MOON_MIN : 10) : 0;
+function stakeNeed(s) { return minOrder() ? Math.max(stakeFloor(s), minTradable(s) || 0) : 0; }
+// what to deposit to reach a target balance: never under the bridge's minimum, never over the per-deposit cap
+function topUpFor(target) {
+  const l = stakeLimit(), d = SETUP && SETUP.deposit;
+  if (!l || !d) return 0;
+  const gap = Math.ceil(target - l.free - 1e-9);
+  return gap <= 0 ? 0 : Math.min(d.max || Infinity, Math.max(d.min, gap));
+}
+// why a setting can't be placed yet, in plain words: "Moonshot starts at $11 · top up $5"
+function needText(s) {
+  const need = stakeNeed(s), add = topUpFor(need);
+  return (Math.abs(s) >= ALL_IN ? `Moonshot starts at ${usd(need)}` : `Trades start at ${usd(need)}`) + (add ? ` · top up ${usd(add)}` : "");
+}
+let TOPUP = null;   // { target, why }: the set-up sheet opened to top up for something specific
+function openTopUp(target, why) { TOPUP = { target, why }; openSetup(); }
 // a quote scaled to another stake: payoffs are proportional, so a $34 quote x (5 / 34) shows what $5 would do
 function scaleQuote(q, k) {
   const m = f => X => f(X) * k;
@@ -1132,7 +1154,7 @@ function minTradable(s) {
 function tradableQuote(s, C) {
   const Lp = riskPct(s);
   if (!Lp) return { q: null, short: false };
-  const MIN_STAKE = minOrder() ? 10 : 0;           // real accounts: $10 is the smallest stake
+  const MIN_STAKE = stakeFloor(s);                 // real accounts: $10 is the smallest stake, $11 in Moonshot
   const q = C >= 1 ? quote(s, C, Lp) : null;
   if (q && (q.bin.n || q.units) && C >= MIN_STAKE) return { q, short: false };
   const need = Math.max(MIN_STAKE, minTradable(s) || 0);
@@ -1156,15 +1178,18 @@ function renderStakeChips() {
   const key = JSON.stringify([chips, state.C, lim && lim.max, lim && Math.round(lim.free * 100)]);
   if (key === chipKey) return;
   chipKey = key;
-  $("amts").innerHTML = lim && lim.max < 10 ? `<button class="amt amt-dep" data-dep="1">Deposit to trade</button>`
-    : chips.map(c => `<button class="amt" data-c="${c}" aria-pressed="${c === state.C}">${lim && c === lim.max ? "Max" : chipLabel(c)}</button>`).join("");
+  const add = lim ? topUpFor(Math.max(10, stakeNeed(state.s))) : 0;
+  $("amts").innerHTML = lim && lim.max < 10 ? `<button class="amt amt-dep" data-dep="1">Top up ${usd(add)} to start</button>`
+    : chips.map(c => `<button class="amt" data-c="${c}" aria-pressed="${c === state.C}">${lim && c === lim.max ? "Max" : chipLabel(c)}</button>`).join("")
+      + (lim && lim.free < lim.cap - 0.5 ? `<button class="amt amt-top" data-top="1">+ Top up</button>` : "");
   $("stakeAvail").hidden = !lim;
   if (lim) $("stakeAvail").textContent = `of ${usd(lim.free, 2)} available` + (lim.free > lim.cap ? ` · ${usd(lim.cap)} per trade` : "");
 }
 $("amts").addEventListener("click", e => {
   const b = e.target.closest(".amt");
   if (!b) return;
-  if (b.dataset.dep) { openSetup(); return; }
+  if (b.dataset.dep) { openTopUp(Math.max(10, stakeNeed(state.s)), "Trades start at $10."); return; }
+  if (b.dataset.top) { const l = stakeLimit(); openTopUp(l.cap, `Top up to trade bigger: stakes go up to ${usd(l.cap)} a trade.`); return; }
   state.C = +b.dataset.c; buzz(6); render(); renderDesk();
 });
 const knob = $("knob"), slide = $("slide"); let drag = null;
@@ -1184,18 +1209,24 @@ $("dgGo").addEventListener("click", () => { $("degenModal").hidden = true; degen
 $("degenModal").addEventListener("click", e => { if (e.target.id === "degenModal") $("degenModal").hidden = true; });
 async function place() {
   const lim0 = stakeLimit();
-  if (lim0 && lim0.max < 10) { setSlide(0); const need = minTradable(state.s) || 10; showToast(`Deposit ${usd(Math.ceil(need - lim0.free))} more to place this trade`, "var(--lev)"); openSetup(); return; }
+  if (lim0 && lim0.max < 10) { setSlide(0); showToast(needText(state.s), "var(--lev)"); openTopUp(Math.max(10, stakeNeed(state.s)), needText(state.s) + "."); return; }
+  if (lim0 && state.C < stakeNeed(state.s)) {
+    setSlide(0); const need = stakeNeed(state.s);
+    if (lim0.max >= need) { state.C = need; render(); renderDesk(); showToast(`Stake set to ${usd(need)}, the smallest for this setting`, "var(--lev)"); }
+    else { showToast(needText(state.s), "var(--lev)"); openTopUp(need, needText(state.s) + "."); }
+    return;
+  }
   const q = quote(state.s, state.C, riskPct(state.s)); setSlide(0);
   if (!q) { showToast("Pick a side first", "var(--ink2)"); return; }
   if (!q.bin.n && !q.units) {
     const need = minTradable(state.s), l = stakeLimit();
-    if (l && need && l.free < need) { showToast(`Deposit ${usd(Math.ceil(need - l.free))} more to place this trade`, "var(--lev)"); openSetup(); }
+    if (l && need && l.free < need) { showToast(needText(state.s), "var(--lev)"); openTopUp(need, needText(state.s) + "."); }
     else showToast(`This trade needs a stake of ${usd(need || 10)}`, "var(--lev)");
     return;
   }
   if (state.C > MAX_STAKE) { showToast(`Stake is above your ${usd(MAX_STAKE)} cap`, "var(--bear)"); return; }
   const lim = stakeLimit();
-  if (lim && state.C > lim.free + 0.01) { showToast(`You have ${usd(lim.free, 2)} available. Deposit more or lower the stake.`, "var(--bear)"); openSetup(); return; }
+  if (lim && state.C > lim.free + 0.01) { showToast(`You have ${usd(lim.free, 2)} available. Lower the stake or top up.`, "var(--bear)"); openTopUp(state.C, `This stake needs ${usd(state.C)}; you have ${usd(lim.free, 2)} free.`); return; }
   // Moonshot puts up to the whole stake on today's line: ask once more, every time
   if (Math.abs(state.s) >= ALL_IN && !degenOk) { openDegen(q); return; }
   degenOk = false;
@@ -1304,8 +1335,8 @@ function renderDesk() {
       <div class="big2 ${v >= 0 ? "pos" : "neg"}">${retPct(v, q.C)}</div><div class="sub" style="font-size:.84rem;margin-top:-6px">${money(v, dp(v))} on your ${usd(q.C, dp(q.C))} stake</div>
       <div class="row" style="font-size:.84rem"><span class="sub">You can lose at most</span><b class="mono">${usd(q.maxLoss, dp(q.maxLoss))}</b></div>
       <div class="row" style="font-size:.84rem"><span class="sub">Never at risk</span><b class="mono">${usd(q.C - q.maxLoss, dp(q.C))}</b></div>
-      ${short && lim ? `<div class="sub" style="font-size:.8rem">Deposit ${usd(Math.ceil(need - lim.free))} more to place this trade.</div>` : ""}`;
-    $("dStake").textContent = short ? "Deposit to trade" : `Stake ${usd(state.C)} · ${bull ? "Bull" : "Bear"} ${ZNAME(a)}`;
+      ${short && lim ? `<div class="sub" style="font-size:.8rem">${needText(state.s)}.</div>` : ""}`;
+    $("dStake").textContent = short ? (lim && topUpFor(need) ? `Top up ${usd(topUpFor(need))} to place this` : `Stake ${usd(need)} to place this`) : `Stake ${usd(state.C)} · ${bull ? "Bull" : "Bear"} ${ZNAME(a)}`;
     $("dStake").classList.toggle("bear", !bull);
     $("dStake").disabled = false;
   } else { $("dSum").innerHTML = `<div class="sub">Slide left for bearish, right for bullish.</div>`; $("dStake").textContent = "Move the slider"; $("dStake").disabled = true; }
@@ -1656,11 +1687,11 @@ function openSetup() {
   if (!SETUP || !SETUP.signed_in) { openConnect(); return; }
   $("setupSheet").hidden = false; renderSetup(); loadSetup();
 }
-$("suClose").addEventListener("click", () => { $("setupSheet").hidden = true; });
+$("suClose").addEventListener("click", () => { $("setupSheet").hidden = true; TOPUP = null; });
 $("dConnect").addEventListener("click", openSetup);
 document.querySelectorAll("[data-demo-btn]").forEach(b => b.addEventListener("click", openSetup));
 $("mSetupBtn").addEventListener("click", openSetup);
-$("dDeposit").addEventListener("click", openSetup);
+$("dDeposit").addEventListener("click", () => { const l = stakeLimit(); if (l) openTopUp(l.cap, `Top up to trade bigger: stakes go up to ${usd(l.cap)} a trade.`); else openSetup(); });
 async function suRun(key, fn, okText) {
   suBusy = key; suMsg[key] = null; renderSetup();
   try { const r = await fn(); suMsg[key] = { ok: okText ? okText(r) : "Done" }; }
@@ -1679,10 +1710,18 @@ function renderSetup() {
   const fundDefault = Math.max(1, Math.floor(b.perp_withdrawable / 2));
   const onHL = b.perp_account_value + b.spot_usdc, tradeMin = d.trade_min || 10;
   // pre-fill what gets you to the $10 needed to trade (never under the bridge's $5 minimum), else a sensible $20
-  const depDefault = Math.min(d.max || Infinity, onHL < tradeMin ? Math.max(d.min, Math.ceil(tradeMin - onHL)) : 20);
+  const depDefault = TOPUP && topUpFor(TOPUP.target) ? topUpFor(TOPUP.target)
+    : Math.min(d.max || Infinity, onHL < tradeMin ? Math.max(d.min, Math.ceil(tradeMin - onHL)) : 20);
+  const quick = [5, 10, 20].filter(v => v >= d.min && (!d.max || v <= d.max));
   const cards = {
-    deposit: [`Deposit USDC`, `${usd(onHL, 2)} on Hyperliquid now${onHL < tradeMin ? ` · you need $${tradeMin} in total to trade` : ""}. Sent from ${d.chain_name}; arrives in about a minute. At least $${d.min} per deposit${d.max ? `, early-access cap $${d.max}` : ""}.`,
-      `<input id="suAmt" type="number" min="${d.min}" ${d.max ? `max="${d.max}"` : ""} step="1" value="${depDefault}" aria-label="Deposit amount in USDC"><button class="btn ${st.deposit ? "" : "go"}" id="suDep"${busy("deposit")}>${suBusy === "deposit" ? "Confirm in wallet…" : st.deposit ? "Deposit more" : "Deposit"}</button>`],
+    deposit: [st.deposit ? `Top up` : `Deposit USDC`,
+      (TOPUP ? `<span class="su-why">${TOPUP.why}</span>` : "") +
+      `USDC from your wallet on ${d.chain_name} to your account on Hyperliquid, in about a minute. ` +
+      `Each deposit is $${d.min}${d.max ? `–$${d.max}` : "+"}: the bridge loses anything under $${d.min}.` +
+      (onHL < tradeMin ? ` Trades start at $${tradeMin}, $${MOON_MIN} for Moonshot.` : ""),
+      `<div class="su-quick">${quick.map(v => `<button class="amt" data-q="${v}">$${v}</button>`).join("")}</div>
+      <input id="suAmt" type="number" min="${d.min}" ${d.max ? `max="${d.max}"` : ""} step="1" value="${depDefault}" aria-label="Deposit amount in USDC"><button class="btn ${st.deposit && !TOPUP ? "" : "go"}" id="suDep"${busy("deposit")}>${suBusy === "deposit" ? "Confirm in wallet…" : `${st.deposit ? "Top up" : "Deposit"} ${usd(depDefault)}`}</button>
+      <p class="su-after" id="suAfter">You'll have about ${usd(onHL + depDefault, 2)} on Hyperliquid.</p>`],
     agent: [`Approve your trading key`, `Cathena makes a key just for you${st.agent && s.agent_address ? ` (${short(s.agent_address)})` : ""} that can place trades but can never withdraw. Sign once to approve it on Hyperliquid.`,
       `<button class="btn ${st.agent ? "" : "go"}" id="suAgent"${busy("agent")}>${suBusy === "agent" ? "Check your wallet…" : st.agent ? "Re-approve" : "Approve"}</button>`],
     builder: [`Allow the cash-out fee`, `Cashing out early carries Cathena's fee (0.5% of what you sell). Approve it once, up to ${s.builder_max_fee_rate}.`,
@@ -1699,9 +1738,17 @@ function renderSetup() {
   box.innerHTML = (s.blocked ? `<div class="su-warn">${s.blocked}</div>` : s.access_ends ? `<div class="su-invite">🎟️ <b>${s.invite}</b> access runs until ${s.access_ends}.</div>` : "") +
     `<div class="su-step done"><div class="su-n">✓</div><div><b>Signed in</b><p>${short(s.address)} · <a id="suOut" style="cursor:pointer;text-decoration:underline">sign out</a></p></div></div>` + moneyCard +
     order.map((k, i) => { const [t, p, act] = cards[k]; const done = st[k], now = k === first;
-      return `<div class="su-step ${done ? "done" : now ? "now" : ""}"><div class="su-n">${done ? "✓" : i + 2}</div><div><b>${t}</b><p>${p}</p>${done && k !== "deposit" ? "" : `<div class="su-act">${act}</div>`}${note(k)}</div></div>`; }).join("");
+      return `<div class="su-step ${done && !(k === "deposit" && TOPUP) ? "done" : now || (k === "deposit" && TOPUP) ? "now" : ""}"><div class="su-n">${k === "deposit" && done ? "$" : done ? "✓" : i + 2}</div><div><b>${t}</b><p>${p}</p>${done && k !== "deposit" ? "" : `<div class="su-act">${act}</div>`}${note(k)}</div></div>`; }).join("");
   $("suOut").onclick = async () => { await api("/v1/auth/logout", { body: {} }); suMsg = {}; CHOSEN = null; $("setupSheet").hidden = true; await loadSetup(); fetchPositions(); refresh(); };
-  if ($("suDep")) $("suDep").onclick = () => { const v = +$("suAmt").value; suRun("deposit", () => depositUSDC(v), tx => { pollDeposit(); return `Sent (${short(tx)}). It shows here in about a minute.`; }); };
+  if ($("suDep")) {
+    const word = st.deposit ? "Top up" : "Deposit";
+    const sync = () => { const v = +$("suAmt").value || 0; if (suBusy !== "deposit") $("suDep").textContent = `${word} ${usd(v)}`;
+      $("suAfter").textContent = v < d.min ? `At least $${d.min}: the bridge loses anything smaller.` : d.max && v > d.max ? `Early access caps each deposit at $${d.max}.` : `You'll have about ${usd(onHL + v, 2)} on Hyperliquid.`; };
+    $("suAmt").oninput = sync;
+    box.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { $("suAmt").value = b.dataset.q; sync(); });
+    $("suDep").onclick = () => { const v = +$("suAmt").value; suRun("deposit", () => depositUSDC(v), tx => { pollDeposit(); return `Sent ${usd(v)} (${short(tx)}). It shows here in about a minute; you can close this.`; }); };
+    if (TOPUP && !suBusy) $("suAmt").closest(".su-step").scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+  }
   if ($("suCloseAll")) $("suCloseAll").onclick = () => suRun("closeall", async () => { const r = await api("/v1/positions/close-all", { body: {} }); await fetchPositions(); return r; },
     r => { const ok = r.closed.filter(x => x.ok); return `Cashed out ${ok.length} · ${money(ok.reduce((a, x) => a + (x.pnl || 0), 0), 2)}`; });
   if ($("suWdBtn")) $("suWdBtn").onclick = () => { const v = +$("suWd").value; suRun("withdraw", () => withdrawUSDC(v), () => `Withdrawal sent: about ${usd(v - s.withdraw_fee, 2)} arrives on Arbitrum in a few minutes.`); };
@@ -1711,7 +1758,7 @@ function renderSetup() {
   $("suFoot").innerHTML = s.ready
     ? `<button class="dcta" id="suGo" style="width:100%">You're set · start trading</button>${s.live_trading ? "" : "<span>This server runs in dry-run mode: trades are simulated until LIVE_TRADING is on.</span>"}`
     : `<span>Max stake ${usd(s.max_stake)} per trade${s.max_open_risk ? ` · at most ${usd(s.max_open_risk)} at risk at once` : ""} · your main key never leaves your wallet</span>`;
-  if ($("suGo")) $("suGo").onclick = () => { $("setupSheet").hidden = true; setTab && !isDesk() && setTab("trade"); };
+  if ($("suGo")) $("suGo").onclick = () => { $("setupSheet").hidden = true; TOPUP = null; setTab && !isDesk() && setTab("trade"); };
   if (s.hl_error) $("suFoot").innerHTML += `<div class="su-err">Hyperliquid: ${s.hl_error}</div>`;
 }
 function pollDeposit() {
@@ -1721,7 +1768,7 @@ function pollDeposit() {
   depositPoll = setInterval(async () => {
     await loadSetup();
     const now = SETUP ? SETUP.balances.perp_account_value + SETUP.balances.spot_usdc : 0;
-    if (now > start + 0.5 || ++n > 40) { clearInterval(depositPoll); if (now > start + 0.5) { suMsg.deposit = { ok: `Arrived: ${usd(now - start, 2)}` }; renderSetup(); } }
+    if (now > start + 0.5 || ++n > 40) { clearInterval(depositPoll); if (now > start + 0.5) { suMsg.deposit = { ok: `Arrived: ${usd(now - start, 2)}. You now have ${usd(now, 2)} to trade with.` }; TOPUP = null; renderSetup(); render(); renderDesk(); } }
   }, 6000);
 }
 
