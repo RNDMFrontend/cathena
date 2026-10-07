@@ -1652,8 +1652,10 @@ async function withdrawUSDC(amount) {
   const b = SETUP.balances, fee = SETUP.withdraw_fee;
   if (!(amount > fee)) throw new Error(`Withdraw more than the $${fee} Hyperliquid fee.`);
   if (amount > b.perp_withdrawable + b.spot_usdc + 0.001) throw new Error(`You can withdraw up to ${usd(b.perp_withdrawable + b.spot_usdc, 2)} right now.`);
-  const short_ = amount - b.perp_withdrawable;                   // withdrawals leave from the perp balance: top it up from spot first
-  if (short_ > 0) { await signAction("usdClassTransfer", { amount: Math.ceil(short_ * 100) / 100, to_perp: true }); await loadSetup(); }
+  // unified accounts hold one USDC balance and Hyperliquid refuses spot↔perp transfers there: withdraw directly.
+  // Otherwise withdrawals leave from the perp balance, so top it up from spot first.
+  const short_ = amount - b.perp_withdrawable;
+  if (short_ > 0 && !SETUP.unified) { await signAction("usdClassTransfer", { amount: Math.ceil(short_ * 100) / 100, to_perp: true }); await loadSetup(); }
   await signAction("withdraw3", { amount });
 }
 setInterval(() => { if (SETUP && SETUP.signed_in && document.visibilityState === "visible") loadSetup(); }, 20000);
