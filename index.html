@@ -1575,6 +1575,9 @@ async function depositUSDC(amount) {
   const units = BigInt(Math.round(amount * 1e6));
   const bal = BigInt(await ETH().request({ method: "eth_call", params: [{ to: d.usdc, data: "0x70a08231" + pad32(a) }, "latest"] }));
   if (bal < units) throw new Error(`Your wallet has $${(Number(bal) / 1e6).toFixed(2)} USDC on ${d.chain_name}.`);
+  // the transfer itself needs a little ETH for gas on Arbitrum (a few cents)
+  const gas = BigInt(await ETH().request({ method: "eth_getBalance", params: [a, "latest"] }));
+  if (gas < 10n ** 13n) throw new Error(`You need a little ETH on ${d.chain_name} to pay the network fee (a few cents). Add some ETH to this wallet, then try again.`);
   return ETH().request({ method: "eth_sendTransaction", params: [{ from: a, to: d.usdc, data: "0xa9059cbb" + pad32(d.bridge) + pad32(units.toString(16)) }] });
 }
 async function withdrawUSDC(amount) {
@@ -1637,9 +1640,12 @@ function renderSetup() {
   const order = ["deposit", "agent", ...(s.builder ? ["builder"] : []), ...(s.unified ? [] : ["fund"])];
   const first = order.find(k => !st[k]);
   const fundDefault = Math.max(1, Math.floor(b.perp_withdrawable / 2));
+  const total = b.perp_account_value + b.spot_usdc, tradeMin = d.trade_min || 10;
+  // pre-fill what gets you to the $10 needed to trade (never under the bridge's $5 minimum), else a sensible $20
+  const depDefault = Math.min(d.max || Infinity, total < tradeMin ? Math.max(d.min, Math.ceil(tradeMin - total)) : 20);
   const cards = {
-    deposit: [`Deposit USDC`, `${usd(b.perp_account_value + b.spot_usdc, 2)} on Hyperliquid now. Sent from ${d.chain_name}; arrives in about a minute. Minimum $${d.min}${d.max ? `, early-access cap $${d.max}` : ""}.`,
-      `<input id="suAmt" type="number" min="${d.min}" ${d.max ? `max="${d.max}"` : ""} step="1" value="${d.max ? Math.min(d.max, 20) : 20}" aria-label="Deposit amount in USDC"><button class="btn ${st.deposit ? "" : "go"}" id="suDep"${busy("deposit")}>${suBusy === "deposit" ? "Confirm in wallet…" : st.deposit ? "Deposit more" : "Deposit"}</button>`],
+    deposit: [`Deposit USDC`, `${usd(total, 2)} on Hyperliquid now${total < tradeMin ? ` · you need $${tradeMin} in total to trade` : ""}. Sent from ${d.chain_name}; arrives in about a minute. At least $${d.min} per deposit${d.max ? `, early-access cap $${d.max}` : ""}.`,
+      `<input id="suAmt" type="number" min="${d.min}" ${d.max ? `max="${d.max}"` : ""} step="1" value="${depDefault}" aria-label="Deposit amount in USDC"><button class="btn ${st.deposit ? "" : "go"}" id="suDep"${busy("deposit")}>${suBusy === "deposit" ? "Confirm in wallet…" : st.deposit ? "Deposit more" : "Deposit"}</button>`],
     agent: [`Approve your trading key`, `Cathena makes a key just for you${st.agent && s.agent_address ? ` (${short(s.agent_address)})` : ""} that can place trades but can never withdraw. Sign once to approve it on Hyperliquid.`,
       `<button class="btn ${st.agent ? "" : "go"}" id="suAgent"${busy("agent")}>${suBusy === "agent" ? "Check your wallet…" : st.agent ? "Re-approve" : "Approve"}</button>`],
     builder: [`Allow the cash-out fee`, `Cashing out early carries Cathena's fee (0.5% of what you sell). Approve it once, up to ${s.builder_max_fee_rate}.`,
