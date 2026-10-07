@@ -71,7 +71,8 @@ button { font: inherit; color: inherit; }
 .dial input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: grab; -webkit-appearance: none; appearance: none; background: none; }
 .dial input::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 80px; }
 .dial input::-moz-range-thumb { width: 30px; height: 80px; border: 0; }
-.zones { display: grid; grid-template-columns: repeat(6, 1fr); font-size: .66rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .07em; font-weight: 700; text-align: center; margin-top: -6px; }
+.zones .zc { grid-column: span 2; }
+.zones { display: grid; grid-template-columns: repeat(6, 1fr); font-size: .6rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; text-align: center; margin-top: -6px; }
 .zones span.on { color: var(--ink); }
 .toast { position: absolute; left: 50%; top: 10px; transform: translate(-50%, -6px) scale(.96); opacity: 0; pointer-events: none; padding: 7px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700; background: var(--s3); border: 1px solid var(--line); white-space: nowrap; transition: opacity .2s, transform .25s cubic-bezier(.2,1.4,.4,1); z-index: 2; }
 .toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
@@ -390,6 +391,12 @@ body.is-desk .sheet .panel { border-radius: 24px; }
 .cw-btn { border: 0; border-radius: 12px; padding: 10px 18px; font: 700 .9rem var(--f-body); cursor: pointer; background: rgba(255,255,255,.07); color: var(--ink); }
 .cw-btn.go { background: var(--bull); color: #04211c; }
 .cw-err { color: var(--bear) !important; }
+.degen { border-color: rgba(255,92,108,.35); box-shadow: 0 40px 100px -30px rgba(255,92,108,.45), inset 0 1px 0 rgba(255,255,255,.05); }
+.dg-emoji { font-size: 3.2rem; line-height: 1; filter: drop-shadow(0 10px 24px rgba(255,200,87,.45)); }
+.degen h3 { font-family: var(--f-disp); font-size: 1.6rem; letter-spacing: -.02em; background: linear-gradient(90deg, #ff5c6c, #ffc857); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dg-go { background: linear-gradient(90deg, #ff5c6c, #ffc857) !important; color: #1b0a00 !important; }
+@media (prefers-reduced-motion: no-preference) { #degenModal:not([hidden]) .dg-emoji { animation: dgLift 1.2s ease-in-out infinite alternate; } }
+@keyframes dgLift { to { transform: translateY(-6px) rotate(-6deg); } }
 .cw-terms { display: grid; gap: 10px; margin: 4px 0 12px; max-height: 52vh; overflow: auto; padding-right: 4px; }
 .cw-terms div { font-size: .84rem; color: var(--ink2); line-height: 1.45; } .cw-terms b { color: var(--ink); display: block; }
 .su-warn { padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--lev) 14%, var(--s2)); border: 1px solid color-mix(in srgb, var(--lev) 35%, transparent); font-size: .86rem; }
@@ -479,7 +486,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
         <svg id="dialSvg" viewBox="0 0 400 80" aria-hidden="true"></svg>
         <input id="slider" type="range" min="-100" max="100" step="1" value="50" aria-label="Your view on BTC by 06:00 UTC, from max bearish to max bullish">
       </div>
-      <div class="zones" aria-hidden="true"><span data-z="-3">Moonshot</span><span data-z="-2">Bold</span><span data-z="-1">Steady</span><span data-z="1">Steady</span><span data-z="2">Bold</span><span data-z="3">Moonshot</span></div>
+      <div class="zones" aria-hidden="true"><span data-z="-3">Aggressive</span><span data-z="-2">Bold</span><span data-z="c" class="zc">Conservative</span><span data-z="2">Bold</span><span data-z="3">Aggressive</span></div>
       <div class="stake">
         <div style="min-width:0">
           <div class="lbl">Stake</div>
@@ -563,6 +570,16 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
     <div class="sub" id="sheetSub"></div>
     <details><summary class="sub" style="cursor:pointer">Orders the backend would send</summary><pre id="orders" style="margin-top:8px"></pre></details>
     <div class="row" style="gap:8px"><button class="ghost" id="viewPos" style="flex:1">View position</button><button class="btn" id="closeSheet" style="flex:1">Done</button></div>
+  </div>
+</div>
+<div class="cw-back" id="degenModal" hidden>
+  <div class="cw degen" role="dialog" aria-modal="true" aria-labelledby="dgTitle">
+    <div class="cw-wait">
+      <div class="dg-emoji" aria-hidden="true">🚀</div>
+      <h3 id="dgTitle">Degen mode</h3>
+      <p id="dgText"></p>
+      <div class="cw-btns"><button class="cw-btn" id="dgBack">Back to safety</button><button class="cw-btn dg-go" id="dgGo">I'm a degen, place it</button></div>
+    </div>
   </div>
 </div>
 <div class="cw-back" id="cwModal" hidden>
@@ -716,7 +733,7 @@ function quote(s, C, Lp) {
   units = Math.floor(units * 1e5) / 1e5;
   const warns = { syn: "", bin: "" };
   const MINO = minOrder();
-  if (units * Math.abs(dlt) * S < MINO || units <= 0) { if (wSyn > 0.05) warns.syn = Lp >= 100 ? "All in: the whole stake goes on today's line." : "Below the $10 perp minimum. Add amount to switch it on."; units = 0; }
+  if (units * Math.abs(dlt) * S < MINO || units <= 0) { if (wSyn > 0.05) warns.syn = Lp >= 100 ? "Moonshot: the whole stake goes on today's line." : "Below the $10 perp minimum. Add amount to switch it on."; units = 0; }
   let capped = units > 0 && wSyn > 0.98;
   if (capped) warns.syn = "Using all the margin this amount allows. Add amount to unlock more convexity.";
   let synBudget = CUSHION * units * f;
@@ -731,7 +748,7 @@ function quote(s, C, Lp) {
     bin = { n: 0, cost: 0, avg: book.asks[0][0] };
     // small stake: the whole max loss runs as the option instead (same as app/engine/quote.py)
     // small stake: the whole max loss runs as the option, sized by margin on the whole stake; bolder = deeper in the
-    // money, so risk and payoff rise together (same rule as app/engine/quote.py; All in stays all-binary)
+    // money, so risk and payoff rise together (same rule as app/engine/quote.py; Moonshot stays all-binary)
     const tdF = 0.30 + 0.45 * a, d1F = bull ? invN(tdF) : invN(1 - tdF);
     const KF = Math.round(S * Math.exp(-sT * d1F + 0.5 * sT * sT) / STRIKE_STEP) * STRIKE_STEP, fF = bs(S, KF, T, SIG, bull), dF = deltaAt(KF);
     const capF = LEV_CAP * C / (1.15 * S);
@@ -784,10 +801,11 @@ function renderHeader() {
 }
 
 // ---------- dial ----------
-const ZONES = [{ name: "Steady", sub: "Smallest risk, capped win", toast: "Steady · smallest risk" }, { name: "Bold", sub: "Bigger payoff if you're right", toast: "Bold · bigger payoff" }, { name: "Moonshot", sub: "Max payoff on a big move", toast: "Moonshot · max payoff" },
-  { name: "All in", sub: "Lose it all if wrong, biggest payout if right", toast: "All in · all or nothing" }];
+const ZONES = [{ name: "Conservative", sub: "Smallest risk, capped win", toast: "Conservative · smallest risk" }, { name: "Bold", sub: "Bigger payoff if you're right", toast: "Bold · bigger payoff" },
+  { name: "Aggressive", sub: "Max payoff on a big move", toast: "Aggressive · max payoff on a big move" },
+  { name: "Moonshot", sub: "Lose it all if wrong, biggest payout if right", toast: "Moonshot · degen territory 🚀" }];
 const zoneOf = s => s === 0 ? 0 : (Math.abs(s) <= 33 ? 1 : Math.abs(s) <= 66 ? 2 : Math.abs(s) < ALL_IN ? 3 : 4) * Math.sign(s);
-const moodWord = s => { const a = Math.abs(s); if (!a) return "Neutral"; const side = s > 0 ? "bullish" : "bearish"; return a < 20 ? "Slightly " + side : a < 45 ? side[0].toUpperCase() + side.slice(1) : a < 75 ? "Very " + side : a < ALL_IN ? "Max " + side : "All-in " + side; };
+const moodWord = s => { const a = Math.abs(s); if (!a) return "Neutral"; const side = s > 0 ? "bullish" : "bearish"; return a < 20 ? "Slightly " + side : a < 45 ? side[0].toUpperCase() + side.slice(1) : a < 75 ? "Very " + side : a < ALL_IN ? "Max " + side : "Degen " + side; };
 function drawDial(s) {
   // drawn in real pixels (viewBox = the dial's width), on exactly the native slider's scale: 15px in from each edge
   const svg = $("dialSvg"), W = Math.max(200, Math.round(svg.getBoundingClientRect().width) || 400), TH = 15;
@@ -918,7 +936,7 @@ function render() {
   if (document.activeElement !== $("slider") || +$("slider").value !== s) $("slider").value = s;
   drawDial(s);
   const z = zoneOf(s);
-  document.querySelectorAll(".zones span").forEach(e => e.classList.toggle("on", +e.dataset.z === Math.sign(z) * Math.min(3, Math.abs(z))));
+  document.querySelectorAll(".zones span").forEach(e => e.classList.toggle("on", e.dataset.z === "c" ? Math.abs(z) === 1 : +e.dataset.z === Math.sign(z) * Math.min(3, Math.abs(z))));
   if (z !== lastZone && z !== 0) { const Z = ZONES[Math.abs(z) - 1]; showToast(Z.toast, Math.abs(z) === 4 ? "var(--bear)" : Math.abs(z) === 3 ? "var(--lev)" : "var(--vol)"); }
   lastZone = z;
   $("mood").firstChild.textContent = moodWord(s);
@@ -1155,6 +1173,15 @@ knob.addEventListener("pointerdown", e => { drag = { x0: e.clientX }; knob.setPo
 knob.addEventListener("pointermove", e => { if (drag) setSlide(e.clientX - drag.x0); });
 knob.addEventListener("pointerup", e => { if (!drag) return; const k = setSlide(e.clientX - drag.x0); drag = null; if (k > 0.9) place(); else { knob.style.transition = "transform .25s"; setSlide(0); setTimeout(() => knob.style.transition = "", 260); } });
 knob.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); place(); } });
+let degenOk = false;
+function openDegen(q) {
+  const above = q.bull ? "at or above" : "below";
+  $("dgText").textContent = `Moonshot puts ${usd(q.maxLoss, dp(q.maxLoss))} of your ${usd(q.C, dp(q.C))} stake on BTC finishing ${above} today's line of $${fmtPx(SNAP.target)} at 06:00 UTC. If it doesn't, you lose all of it.`;
+  $("degenModal").hidden = false; buzz([12, 40, 12]);
+}
+$("dgBack").addEventListener("click", () => { $("degenModal").hidden = true; });
+$("dgGo").addEventListener("click", () => { $("degenModal").hidden = true; degenOk = true; place(); });
+$("degenModal").addEventListener("click", e => { if (e.target.id === "degenModal") $("degenModal").hidden = true; });
 async function place() {
   const lim0 = stakeLimit();
   if (lim0 && lim0.max < 10) { setSlide(0); const need = minTradable(state.s) || 10; showToast(`Deposit ${usd(Math.ceil(need - lim0.free))} more to place this trade`, "var(--lev)"); openSetup(); return; }
@@ -1169,6 +1196,9 @@ async function place() {
   if (state.C > MAX_STAKE) { showToast(`Stake is above your ${usd(MAX_STAKE)} cap`, "var(--bear)"); return; }
   const lim = stakeLimit();
   if (lim && state.C > lim.free + 0.01) { showToast(`You have ${usd(lim.free, 2)} available. Deposit more or lower the stake.`, "var(--bear)"); openSetup(); return; }
+  // Moonshot puts up to the whole stake on today's line: ask once more, every time
+  if (Math.abs(state.s) >= ALL_IN && !degenOk) { openDegen(q); return; }
+  degenOk = false;
   $("slideTxt").textContent = "Placing…";
   try {
     const p = await api("/v1/trades", { body: { s: state.s, stake: state.C, expected_max_loss: +q.maxLoss.toFixed(2) } });
@@ -1212,9 +1242,9 @@ async function refresh() {
 const DESK = matchMedia("(min-width: 1100px)");
 const isDesk = () => document.body.classList.contains("is-desk");
 const dk = { tf: "15m", list: "setups", candles: [], ticker: [], acct: null };
-const ZNAME = a => a <= 33 ? "Steady" : a <= 66 ? "Bold" : a < ALL_IN ? "Moonshot" : "All in";
-const SETUPS = [[-100, "Bear", "All in", "lose it all or win big"], [-88, "Bear", "Moonshot", "max payoff on a big drop"], [-55, "Bear", "Bold", "bigger payoff if it falls"], [-25, "Bear", "Steady", "smallest risk, capped win"],
-  [25, "Bull", "Steady", "smallest risk, capped win"], [55, "Bull", "Bold", "bigger payoff if it rises"], [88, "Bull", "Moonshot", "max payoff on a big move"], [100, "Bull", "All in", "lose it all or win big"]];
+const ZNAME = a => a <= 33 ? "Conservative" : a <= 66 ? "Bold" : a < ALL_IN ? "Aggressive" : "Moonshot";
+const SETUPS = [[-100, "Bear", "Moonshot", "lose it all or win big"], [-88, "Bear", "Aggressive", "max payoff on a big drop"], [-55, "Bear", "Bold", "bigger payoff if it falls"], [-25, "Bear", "Conservative", "smallest risk, capped win"],
+  [25, "Bull", "Conservative", "smallest risk, capped win"], [55, "Bull", "Bold", "bigger payoff if it rises"], [88, "Bull", "Aggressive", "max payoff on a big move"], [100, "Bull", "Moonshot", "lose it all or win big"]];
 
 function arrange() {
   const want = DESK.matches;
@@ -1312,7 +1342,7 @@ function renderDeskLists() {
 
 
 // ---------- avatars, icons and the leaderboard ----------
-const ZICON = { Moonshot: "i-rocket", Bold: "i-flame", Steady: "i-shield", "All in": "i-bolt" };
+const ZICON = { Conservative: "i-shield", Bold: "i-flame", Aggressive: "i-bolt", Moonshot: "i-rocket" };
 const SIDEGRAD = s => s >= 0 ? ["#5dfbe0", "#16b39c", "#36e3c8"] : ["#ff9aa6", "#e0344b", "#ff5c6c"];
 const ico = (id, cls = "ic") => `<svg class="${cls}"><use href="#${id}"/></svg>`;
 function zoneAvatar(s) {
