@@ -1265,6 +1265,7 @@ async function place() {
     const b = p.binary, y = p.synthetic;
     $("sheetH").textContent = usd(p.stake) + " staked · " + moodWord(p.s);
     $("sheetSub").textContent = `${b.n} ${p.bull ? "Yes" : "No"} filled at ${(+b.avg_px).toFixed(4)} (${usd(b.cost, 2)})` + (y.units ? ` · synthetic ${p.bull ? "call" : "put"} ${fmtPx(y.strike)} ${SYN_STATUS[y.status] || y.status}, perp ${y.held.toFixed(4)} BTC at ${y.leverage}x isolated` : "") + ` · max loss ${usd(p.max_loss, 2)} · ${CLEAN ? "on Hyperliquid" : p.mode === "live" ? "LIVE on Hyperliquid" : "dry run, nothing sent"}.`;
+    if (b.status === "partial") { const w = (p.warnings || []).find(x => /contracts filled/.test(x)); $("sheetSub").textContent = (w ? w + " " : "") + $("sheetSub").textContent; $("sheetH").textContent = usd(b.cost, 2) + " staked (partly filled) · " + moodWord(p.s); }
     $("orders").textContent = JSON.stringify(p, null, 2);
     $("sheet").hidden = false; burst(); buzz([10, 40, 18]);
     fetchPositions();
