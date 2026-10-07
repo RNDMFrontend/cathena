@@ -400,6 +400,16 @@ body.is-desk .sheet .panel { border-radius: 24px; }
 .adm-code b { font-size: 1rem; } .adm-code small { color: var(--ink3); }
 .adm-btn { border: 1px solid var(--line); background: var(--s3); color: var(--ink); border-radius: 10px; padding: 6px 12px; font: 700 .8rem var(--f-body); cursor: pointer; }
 .adm-btn.warn { background: color-mix(in srgb, var(--bear) 18%, var(--s3)); color: var(--bear); border-color: color-mix(in srgb, var(--bear) 35%, transparent); }
+/* demo banner: visitors trade paper money until they connect */
+.demo-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 14px; font-size: .88rem; color: var(--ink2);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--vol) 16%, var(--s1)), var(--s1)); border: 1px solid color-mix(in srgb, var(--vol) 30%, transparent); }
+.demo-bar b { color: var(--ink); }
+.demo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lev); flex: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--lev) 20%, transparent); }
+.demo-btn { margin-left: auto; flex: none; border: 0; border-radius: 10px; padding: 8px 14px; font: 800 .84rem var(--f-body); cursor: pointer; color: #04211c;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bull) 78%, #fff), var(--bull) 55%); }
+.demo-wrap { padding: 12px 22px 0; }
+.demo-wrap .demo-bar { max-width: none; }
+@media (max-width: 420px) { .demo-bar { font-size: .8rem; } .demo-btn { padding: 7px 10px; } }
 .su-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dt-connect { border: 0; border-radius: 12px; padding: 11px 18px; font: 800 .95rem var(--f-body); cursor: pointer; color: #04211c; background: linear-gradient(180deg, color-mix(in srgb, var(--bull) 78%, #fff), var(--bull) 55%); box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 10px 26px -12px var(--bull); }
 #desk .dl { overflow-x: hidden; }
@@ -434,6 +444,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
 <body>
 
 <div class="app">
+  <div class="demo-bar" data-demo hidden><span class="demo-dot"></span><span data-demo-txt></span><button class="demo-btn" data-demo-btn></button></div>
   <div class="card" id="headCard" style="gap:10px">
     <div class="row">
       <div class="brand" style="display:flex;align-items:center;gap:10px"><img src="/assets/cathena-logo-160.png" alt="" class="logo">Cathena <span>Convex</span></div>
@@ -591,6 +602,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
       <img src="/assets/cathena-logo-160.png" class="dt-avatar" alt="Account">
     </div>
   </header>
+  <div class="demo-wrap" id="demoWrap"><div class="demo-bar" data-demo hidden><span class="demo-dot"></span><span data-demo-txt></span><button class="demo-btn" data-demo-btn></button></div></div>
   <div class="dg" id="dTradeView">
     <aside class="dl panel">
       <div class="ltabs" role="group" aria-label="List"><button data-dl="setups" aria-pressed="true"><svg class="ic"><use href="#i-sparkle"/></svg>Setups</button><button data-dl="live" aria-pressed="false"><svg class="ic"><use href="#i-bolt"/></svg>Live <span class="n" id="dLiveN"></span></button></div>
@@ -1460,6 +1472,15 @@ function renderSetupEntry() {
   document.querySelectorAll("#desk .dt-bal").forEach(e => e.hidden = !ready && !DEMO);
   $("mSetupBtn").textContent = ready ? "Manage" : label;
   $("navAdmin").hidden = !(s && s.owner);
+  // demo banner: say plainly that a visitor is on paper money, and how to go real
+  const signed = s && s.signed_in;
+  document.querySelectorAll("[data-demo]").forEach(bar => {
+    bar.hidden = !!ready || DEMO;
+    bar.querySelector("[data-demo-txt]").innerHTML = signed ? "<b>Almost there.</b> Finish set up to trade from your own account."
+      : "<b>Demo mode:</b> you're trading paper money. Connect a wallet to trade for real, from $5.";
+    bar.querySelector("[data-demo-btn]").textContent = signed ? "Finish set up" : "Connect wallet";
+  });
+  $("demoWrap").hidden = !!ready || DEMO;
   $("mSetupT").textContent = ready ? `Trading as ${short(s.address)}` : s && s.signed_in ? "Almost there" : "Trade with your own wallet";
   $("mSetupS").textContent = ready ? (s.live_trading ? "Live on Hyperliquid" : "Set up done · this server simulates trades") : "Connect, deposit USDC, and you're set.";
 }
@@ -1469,6 +1490,7 @@ function openSetup() {
 }
 $("suClose").addEventListener("click", () => { $("setupSheet").hidden = true; });
 $("dConnect").addEventListener("click", openSetup);
+document.querySelectorAll("[data-demo-btn]").forEach(b => b.addEventListener("click", openSetup));
 $("mSetupBtn").addEventListener("click", openSetup);
 $("dDeposit").addEventListener("click", openSetup);
 async function suRun(key, fn, okText) {
