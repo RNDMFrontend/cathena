@@ -75,6 +75,13 @@ button { font: inherit; color: inherit; }
 .zones { display: grid; grid-template-columns: repeat(6, 1fr); font-size: .6rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; text-align: center; margin-top: -6px; }
 .zones span.on { color: var(--ink); }
 .toast { position: absolute; left: 50%; top: 10px; transform: translate(-50%, -6px) scale(.96); opacity: 0; pointer-events: none; padding: 7px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700; background: var(--s3); border: 1px solid var(--line); white-space: nowrap; transition: opacity .2s, transform .25s cubic-bezier(.2,1.4,.4,1); z-index: 2; }
+.transit { white-space: nowrap; position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 10px); transform: translateX(-50%); z-index: 60; display: flex; gap: 10px; align-items: center; padding: 9px 14px; border-radius: 999px; background: var(--s2); border: 1px solid color-mix(in srgb, var(--bull) 45%, var(--line)); font-size: .82rem; font-weight: 700; box-shadow: 0 10px 30px rgba(0,0,0,.35); max-width: calc(100vw - 32px); }
+.transit .tdot { width: 9px; height: 9px; border-radius: 50%; background: var(--bull); flex: none; animation: tpulse 1.2s ease-in-out infinite; }
+.transit .tclock { font-family: var(--f-mono); color: var(--bull); }
+.transit .tsub { color: var(--ink2); font-weight: 500; }
+.transit.done .tdot { animation: none; }
+@keyframes tpulse { 50% { opacity: .3; transform: scale(.7); } }
+@media (prefers-reduced-motion: reduce) { .transit .tdot { animation: none; } }
 .toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
 
 /* stake + level meter */
@@ -464,6 +471,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
 </style>
 </head>
 <body>
+<div id="transit" class="transit" hidden role="status" aria-live="polite"></div>
 
 <div class="app">
   <div class="demo-bar" data-demo hidden><span class="demo-dot"></span><span data-demo-txt></span><button class="demo-btn" data-demo-btn></button></div>
@@ -765,6 +773,12 @@ function quote(s, C, Lp) {
       warns.bin = ""; warns.syn = "Small stake: the whole position runs as the option, without the daily binary.";
     }
   }
+  // Moonshot is off on a side whose binary already costs MOON_MAX_PX or more (same rule as app/engine/quote.py)
+  let blocked = "";
+  if (Math.abs(s) >= ALL_IN && book.asks[0][0] >= MOON_MAX_PX) {
+    blocked = `Moonshot is off for ${bull ? "bulls" : "bears"} right now: BTC is already ${bull ? "above" : "below"} today's line, so going all in would pay at most +${Math.round((1 / book.asks[0][0] - 1) * 100)}%. Aggressive pays more.`;
+    bin = { n: 0, cost: 0, avg: book.asks[0][0] }; units = 0; synBudget = 0; capped = false; warns.bin = blocked; warns.syn = "";
+  }
   const cash = C - bin.cost;
   const levNow = units ? units * Math.abs(dlt) * S / C : 0, levFull = units ? units * S / C : 0;   // on the whole amount
   const maxLoss = bin.cost + synBudget;
@@ -773,7 +787,7 @@ function quote(s, C, Lp) {
   const synP = (X, c) => units ? Math.max(units * pay(X) - c * units * f, -synBudget) : 0;
   const pnl = X => binP(X) + synP(X, EXP_COST);
   const empty = !bin.n && !units;   // nothing clears the minimums: nothing to stake
-  return { s, bull, a, C, Lp, M, wSyn, K, f, dlt, delta, units, unitsCap, capped, synBudget, bin, book, cash, levNow, levFull, maxLoss, pnl, binP, synP, warns, minStake, empty };
+  return { s, bull, a, C, Lp, M, wSyn, K, f, dlt, delta, units, unitsCap, capped, synBudget, bin, book, cash, levNow, levFull, maxLoss, pnl, binP, synP, warns, minStake, empty, blocked };
 }
 
 
@@ -829,7 +843,7 @@ function drawDial(s) {
 }
 
 // ---------- risk follows the dial: 20% of stake at the mild end, 50% at max ----------
-const ALL_IN = 95;   // |dial| 95–100: max loss ramps 50% → 100% (same as app/engine/quote.py)
+const ALL_IN = 95, MOON_MAX_PX = 0.75;   // |dial| 95–100: max loss ramps 50% → 100% (same as app/engine/quote.py)
 const riskPct = s => { const a = Math.abs(s); return !a ? 0 : a < ALL_IN ? Math.round((20 + 30 * a / 100) / 5) * 5 : Math.round((50 + 50 * (a - ALL_IN) / (100 - ALL_IN)) / 5) * 5; };
 
 // ---------- chart ----------
@@ -917,7 +931,8 @@ function tweenText(id, to, fmt, cls) {
   const el = $(id), from = tweens[id] ?? to; tweens[id] = to; if (cls) el.className = cls(to);
   if (reduced || from === to || document.hidden) { el.textContent = fmt(to); return; }   // background tabs pause animation frames
   const t0 = performance.now(), dur = 300;
-  const step = now => { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = fmt(from + (to - from) * e); if (k < 1 && tweens[id] === to) requestAnimationFrame(step); };
+  const step = now => { if (tweens[id] !== to) return;   // a newer value took over: never write a stale frame
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = fmt(from + (to - from) * e); if (k < 1 && tweens[id] === to) requestAnimationFrame(step); };
   requestAnimationFrame(step);
 }
 
@@ -952,7 +967,9 @@ function render() {
   $("stakeAmt").textContent = usd(C);
   // scenario pin follows the side
   if (state.move !== null) state.pin = S * (1 + (s < 0 ? -1 : 1) * state.move);
-  drawMarks(); renderHero(q);
+  drawMarks();
+  if (q && q.blocked) { $("heroLbl").textContent = "Moonshot is off right now"; tweenText("heroVal", 0, () => "—", () => "big"); $("heroSub").textContent = q.blocked; }
+  else renderHero(q);
   if (tq.short && lim) $("heroSub").textContent += " · " + needText(s);
   if (!q) { animateTo(seriesFor(null), null); $("holdLegend").innerHTML = ""; ["mixBin", "mixSyn", "mixCash"].forEach(i => $(i).style.width = "0%"); $("warnLine").hidden = true; tweenText("stLoss", 0, () => "—"); tweenText("stSafe", 0, () => "—"); tweenText("stLev", 0, () => "—"); return; }
   tweenText("stLoss", -q.maxLoss, x => money(x));
@@ -1157,7 +1174,8 @@ function tradableQuote(s, C) {
   const Lp = riskPct(s);
   if (!Lp) return { q: null, short: false };
   const MIN_STAKE = stakeFloor(s);                 // real accounts: $10 is the smallest stake, $11 in Moonshot
-  const q = C >= 1 ? quote(s, C, Lp) : null;
+  const q = C >= 1 ? quote(s, C, Lp) : quote(s, Math.max(MIN_STAKE, 10), Lp);
+  if (q && q.blocked) return { q, short: false, blocked: q.blocked };
   if (q && (q.bin.n || q.units) && C >= MIN_STAKE) return { q, short: false };
   const need = Math.max(MIN_STAKE, minTradable(s) || 0);
   if (!need) return { q, short: false };
@@ -1211,6 +1229,8 @@ $("dgGo").addEventListener("click", () => { $("degenModal").hidden = true; degen
 $("degenModal").addEventListener("click", e => { if (e.target.id === "degenModal") $("degenModal").hidden = true; });
 async function place() {
   const lim0 = stakeLimit();
+  const qb = Math.abs(state.s) >= ALL_IN ? quote(state.s, Math.max(state.C, MOON_MIN), riskPct(state.s)) : null;
+  if (qb && qb.blocked) { setSlide(0); showToast("Moonshot is off right now. Aggressive pays more.", "var(--lev)"); return; }
   if (lim0 && lim0.max < 10) { setSlide(0); showToast(needText(state.s), "var(--lev)"); openTopUp(Math.max(10, stakeNeed(state.s)), needText(state.s) + "."); return; }
   if (lim0 && state.C < stakeNeed(state.s)) {
     setSlide(0); const need = stakeNeed(state.s);
@@ -1220,6 +1240,7 @@ async function place() {
   }
   const q = quote(state.s, state.C, riskPct(state.s)); setSlide(0);
   if (!q) { showToast("Pick a side first", "var(--ink2)"); return; }
+  if (q.blocked) { showToast("Moonshot is off right now. Aggressive pays more.", "var(--lev)"); return; }
   if (!q.bin.n && !q.units) {
     const need = minTradable(state.s), l = stakeLimit();
     if (l && need && l.free < need) { showToast(needText(state.s), "var(--lev)"); openTopUp(need, needText(state.s) + "."); }
@@ -1331,7 +1352,10 @@ function renderDesk() {
   if (!isDesk() || !SNAP) return;
   const lim = stakeLimit();
   const a = Math.abs(state.s), bull = state.s >= 0, { q, short, need } = tradableQuote(state.s, state.C);
-  if (q) {
+  if (q && q.blocked) {
+    $("dSum").innerHTML = `<div class="sub" style="font-size:.86rem">${q.blocked}</div>`;
+    $("dStake").textContent = "Moonshot is off right now"; $("dStake").disabled = true;
+  } else if (q) {
     const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X);
     $("dSum").innerHTML = `<div class="sub" style="font-size:.82rem">If BTC is ${bull ? "up" : "down"} 3% by 06:00</div>
       <div class="big2 ${v >= 0 ? "pos" : "neg"}">${retPct(v, q.C)}</div><div class="sub" style="font-size:.84rem;margin-top:-6px">${money(v, dp(v))} on your ${usd(q.C, dp(q.C))} stake</div>
@@ -1703,6 +1727,37 @@ async function suRun(key, fn, okText) {
   suBusy = null; await loadSetup(); renderSetup();
 }
 let depositPoll = null;
+// money moving through the bridge: a pill with a running clock until it lands (deposits ~1 min, withdrawals ~3–6 min)
+let TRANSIT = null, transitTick = null;
+function startTransit(kind, amount) {
+  TRANSIT = { kind, amount, t0: Date.now() };
+  clearInterval(transitTick); transitTick = setInterval(renderTransit, 1000); renderTransit();
+}
+function endTransit(text) {
+  if (!TRANSIT) return;
+  clearInterval(transitTick); TRANSIT = null;
+  const el = $("transit"); el.classList.add("done"); el.innerHTML = `<span class="tdot"></span><span>${text}</span>`; el.hidden = false; buzz([10, 40, 18]);
+  setTimeout(() => { if (!TRANSIT) { el.hidden = true; el.classList.remove("done"); } }, 6000);
+}
+function renderTransit() {
+  const el = $("transit");
+  if (!TRANSIT) { el.hidden = true; return; }
+  const sec = Math.floor((Date.now() - TRANSIT.t0) / 1000), clock = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  const dep = TRANSIT.kind === "deposit", late = sec > (dep ? 300 : 900);
+  const what = dep ? `Deposit on its way` : `Withdrawal on its way`;
+  const sub = late ? "slower than usual, still safe" : dep ? "usually ~1 min" : "usually 3–6 min";
+  el.classList.remove("done"); el.hidden = false;
+  el.innerHTML = `<span class="tdot"></span><span>${what}</span><span class="tclock">${clock}</span><span class="tsub">${sub}</span>`;
+}
+function pollWithdraw(expect) {
+  const base = WALLET_USDC;
+  let n = 0;
+  const h = setInterval(async () => {
+    const now = await loadWalletUSDC();
+    if (base !== null && now !== null && now >= base + expect - 0.01) { clearInterval(h); WALLET_USDC = now; endTransit(`Arrived: ${usd(now - base, 2)} is in your wallet on Arbitrum`); if (!$("setupSheet").hidden && !suBusy) renderSetup(); }
+    else if (++n > 180) { clearInterval(h); }
+  }, 10000);
+}
 // amount pickers: a 0-to-max slider in cents, a box to type in, and a Max button, all kept in sync
 const cents = v => Math.floor(v * 100 + 1e-6) / 100;
 function rangeBox(id, min, max, val, label) {
@@ -1727,6 +1782,7 @@ async function loadWalletUSDC() {
     const j = await r.json();
     if (j.result) { const was = WALLET_USDC; WALLET_USDC = Number(BigInt(j.result)) / 1e6; if (was === null && !$("setupSheet").hidden && !suBusy) renderSetup(); }
   } catch (e) { /* keep the cap as the max */ }
+  return WALLET_USDC;
 }
 function renderSetup() {
   const s = SETUP, box = $("suSteps");
@@ -1776,14 +1832,14 @@ function renderSetup() {
     const sync = () => { const v = +$("suAmt").value || 0; if (suBusy !== "deposit") $("suDep").textContent = `${word} ${usd(v, 2)}`;
       $("suAfter").textContent = v < d.min ? `At least $${d.min}: the bridge loses anything smaller.` : d.max && v > d.max ? `Early access caps each deposit at $${d.max}.` : WALLET_USDC !== null && v > WALLET_USDC + 1e-6 ? `Your wallet only has ${usd(cents(WALLET_USDC), 2)} USDC.` : `You'll have about ${usd(onHL + v, 2)} on Hyperliquid.`; };
     wireRange("suAmt", sync);
-    $("suDep").onclick = () => { const v = cents(+$("suAmt").value); suRun("deposit", () => depositUSDC(v), tx => { pollDeposit(); return `Sent ${usd(v)} (${short(tx)}). It shows here in about a minute; you can close this.`; }); };
+    $("suDep").onclick = () => { const v = cents(+$("suAmt").value); suRun("deposit", () => depositUSDC(v), tx => { startTransit("deposit", v); pollDeposit(); return `Sent ${usd(v)} (${short(tx)}). It shows here in about a minute; you can close this.`; }); };
     if (TOPUP && !suBusy) $("suAmt").closest(".su-step").scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
   }
   if ($("suCloseAll")) $("suCloseAll").onclick = () => suRun("closeall", async () => { const r = await api("/v1/positions/close-all", { body: {} }); await fetchPositions(); return r; },
     r => { const ok = r.closed.filter(x => x.ok); return `Cashed out ${ok.length} · ${money(ok.reduce((a, x) => a + (x.pnl || 0), 0), 2)}`; });
   if ($("suWd")) wireRange("suWd", () => { const v = +$("suWd").value || 0; if (suBusy !== "withdraw") $("suWdBtn").textContent = `Withdraw ${usd(v, 2)}`;
     $("suWdNote").textContent = v <= s.withdraw_fee ? `Withdraw more than the $${s.withdraw_fee} Hyperliquid fee.` : `You get about ${usd(v - s.withdraw_fee, 2)} back in ${short(s.address)} on Arbitrum; Hyperliquid keeps $${s.withdraw_fee}.` + (openN ? " Cash out first to withdraw everything." : ""); });
-  if ($("suWdBtn")) $("suWdBtn").onclick = () => { const v = cents(+$("suWd").value); suRun("withdraw", () => withdrawUSDC(v), () => `Withdrawal sent: about ${usd(v - s.withdraw_fee, 2)} arrives on Arbitrum in a few minutes.`); };
+  if ($("suWdBtn")) $("suWdBtn").onclick = () => { const v = cents(+$("suWd").value); suRun("withdraw", async () => { await loadWalletUSDC(); await withdrawUSDC(v); }, () => { startTransit("withdraw", v); pollWithdraw(v - s.withdraw_fee); return `Withdrawal sent: about ${usd(v - s.withdraw_fee, 2)} arrives in your wallet on Arbitrum, usually in 3–6 minutes. You can close this.`; }); };
   if ($("suAgent")) $("suAgent").onclick = () => suRun("agent", () => signAction("approveAgent"), () => "Trading key approved");
   if ($("suBuilder")) $("suBuilder").onclick = () => suRun("builder", () => signAction("approveBuilderFee"), () => "Fee approved");
   if ($("suFundBtn")) $("suFundBtn").onclick = () => { const v = +$("suFund").value; suRun("fund", () => signAction("usdClassTransfer", { amount: v }), () => "Moved to spot"); };
@@ -1800,7 +1856,7 @@ function pollDeposit() {
   depositPoll = setInterval(async () => {
     await loadSetup();
     const now = SETUP ? SETUP.balances.perp_account_value + SETUP.balances.spot_usdc : 0;
-    if (now > start + 0.5 || ++n > 40) { clearInterval(depositPoll); if (now > start + 0.5) { suMsg.deposit = { ok: `Arrived: ${usd(now - start, 2)}. You now have ${usd(now, 2)} to trade with.` }; TOPUP = null; WALLET_USDC = null; renderSetup(); render(); renderDesk(); loadWalletUSDC(); } }
+    if (now > start + 0.5 || ++n > 100) { clearInterval(depositPoll); if (now > start + 0.5) { suMsg.deposit = { ok: `Arrived: ${usd(now - start, 2)}. You now have ${usd(now, 2)} to trade with.` }; TOPUP = null; WALLET_USDC = null; endTransit(`Arrived: ${usd(now - start, 2)} is on Hyperliquid`); renderSetup(); render(); renderDesk(); loadWalletUSDC(); } }
   }, 6000);
 }
 
