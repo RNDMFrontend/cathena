@@ -706,8 +706,9 @@ function quote(s, C, Lp) {
   const d1 = bull ? invN(delta) : invN(1 - delta);
   let K = S * Math.exp(-sT * d1 + 0.5 * sT * sT);
   K = Math.round(K / STRIKE_STEP) * STRIKE_STEP;
-  const f = bs(S, K, T, SIG, bull);
-  const dlt = bull ? N((Math.log(S / K) + 0.5 * sT * sT) / sT) : N((Math.log(S / K) + 0.5 * sT * sT) / sT) - 1;
+  let f = bs(S, K, T, SIG, bull);
+  const deltaAt = k => bull ? N((Math.log(S / k) + 0.5 * sT * sT) / sT) : N((Math.log(S / k) + 0.5 * sT * sT) / sT) - 1;
+  let dlt = deltaAt(K);
   // Margin capacity: at DELTA_CAP of full size, leverage on the cash that is never at risk stays under LEV_CAP.
   const unitsCap = Math.max(0, LEV_CAP * (C - M) / (DELTA_CAP * S));
   let units = unitsCap * wSyn;
@@ -729,9 +730,15 @@ function quote(s, C, Lp) {
     warns.bin = bin.n ? "Binary leg is under Hyperliquid's $10 minimum at this stake; raise the stake to trade this setting." : "";
     bin = { n: 0, cost: 0, avg: book.asks[0][0] };
     // small stake: the whole max loss runs as the option instead (same as app/engine/quote.py)
-    const fb = f > 0 ? Math.floor(Math.min(unitsCap, M / (CUSHION * f)) * 1e5) / 1e5 : 0;
-    if (fb > 0 && fb * Math.abs(dlt) * S >= MINO && MINO > 0) {
-      units = fb; synBudget = CUSHION * fb * f; capped = fb >= unitsCap - 1e-9;
+    // small stake: the whole max loss runs as the option, sized by margin on the whole stake; bolder = deeper in the
+    // money, so risk and payoff rise together (same rule as app/engine/quote.py; All in stays all-binary)
+    const tdF = 0.30 + 0.45 * a, d1F = bull ? invN(tdF) : invN(1 - tdF);
+    const KF = Math.round(S * Math.exp(-sT * d1F + 0.5 * sT * sT) / STRIKE_STEP) * STRIKE_STEP, fF = bs(S, KF, T, SIG, bull), dF = deltaAt(KF);
+    const capF = LEV_CAP * C / (1.15 * S);
+    const fb = fF > 0 ? Math.floor(Math.min(capF, M / (CUSHION * fF)) * 1e5) / 1e5 : 0;
+    if (fb > 0 && fb * Math.abs(dF) * S >= MINO && MINO > 0 && Math.abs(s) < ALL_IN) {
+      K = KF; f = fF; dlt = dF;
+      units = fb; synBudget = CUSHION * fb * fF; capped = fb >= capF - 1e-9;
       warns.bin = ""; warns.syn = "Small stake: the whole position runs as the option, without the daily binary.";
     }
   }
@@ -1090,7 +1097,7 @@ const minOrder = () => (typeof SETUP !== "undefined" && SETUP && SETUP.signed_in
 function scaleQuote(q, k) {
   const m = f => X => f(X) * k;
   return { ...q, C: q.C * k, M: q.M * k, units: q.units * k, unitsCap: q.unitsCap * k, synBudget: q.synBudget * k, cash: q.cash * k, maxLoss: q.maxLoss * k,
-           delta: q.delta * k, bin: { ...q.bin, n: q.bin.n * k, cost: q.bin.cost * k }, pnl: m(q.pnl), binP: m(q.binP), synP: m(q.synP), warns: { syn: "", bin: "" } };
+           bin: { ...q.bin, n: q.bin.n * k, cost: q.bin.cost * k }, pnl: m(q.pnl), binP: m(q.binP), synP: m(q.synP), warns: { syn: "", bin: "" } };
 }
 // smallest whole-dollar stake where the binary clears the $10 minimum (same search as min_tradable_stake on the server)
 const MIN_CACHE = new Map();
