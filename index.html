@@ -415,6 +415,8 @@ body.is-desk .sheet .panel { border-radius: 24px; }
 .dnav a { display: flex; align-items: center; gap: 7px; padding: 8px 16px; border-radius: 10px; font-weight: 600; font-size: .92rem; color: var(--ink3); text-decoration: none; }
 .dnav a:hover { color: var(--ink); }
 .dnav a .ic { color: var(--vol); }
+.stake-avail { font-size: .76rem; color: var(--ink3); margin-top: 2px; }
+.amt-dep { background: var(--bull) !important; color: #04211c !important; border-color: transparent !important; font-family: var(--f-body) !important; font-weight: 800; }
 .su-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dt-connect { border: 0; border-radius: 12px; padding: 11px 18px; font: 800 .95rem var(--f-body); cursor: pointer; color: #04211c; background: linear-gradient(180deg, color-mix(in srgb, var(--bull) 78%, #fff), var(--bull) 55%); box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 10px 26px -12px var(--bull); }
 #desk .dl { overflow-x: hidden; }
@@ -480,10 +482,9 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
         <div style="min-width:0">
           <div class="lbl">Stake</div>
           <div class="stakeAmt mono" id="stakeAmt">$1,000</div>
+          <div class="stake-avail" id="stakeAvail" hidden></div>
         </div>
-        <div class="amts" role="group" aria-label="Stake">
-          <button class="amt" data-c="100">100</button><button class="amt" data-c="250">250</button><button class="amt" data-c="500">500</button><button class="amt" data-c="1000">1k</button><button class="amt" data-c="2500">2.5k</button>
-        </div>
+        <div class="amts" id="amts" role="group" aria-label="Stake"></div>
       </div>
     </div>
 
@@ -885,7 +886,10 @@ function renderHero(q) {
   $("heroSub").textContent = money(v) + " on your " + usd(q.C) + " stake · max loss " + retPct(-q.maxLoss, q.C).replace("−", "") + " (" + usd(q.maxLoss) + ")" + (q.C - q.maxLoss >= 0.5 ? " · " + usd(q.C - q.maxLoss) + " never at risk" : "");
 }
 function render() {
-  const { s, C } = state, Lp = riskPct(s), q = quote(s, C, Lp);
+  const lim = stakeLimit(), broke = lim && lim.max < 10;
+  if (lim && state.C < 10 && lim.max >= 10) state.C = Math.min(lim.max, 20);    // just funded: start from a stake that can trade
+  renderStakeChips();                                                          // clamps the stake to what you have
+  const { s, C } = state, Lp = riskPct(s), q = broke ? null : quote(s, C, Lp);
   document.documentElement.style.setProperty("--side", s < 0 ? "var(--bear)" : "var(--bull)");
   drawDial(s);
   const z = zoneOf(s);
@@ -897,10 +901,10 @@ function render() {
   $("sval").textContent = (s > 0 ? "+" : "") + s;
   // stake + level
   $("stakeAmt").textContent = usd(C);
-  document.querySelectorAll(".amt").forEach(b => b.setAttribute("aria-pressed", +b.dataset.c === C));
   // scenario pin follows the side
   if (state.move !== null) state.pin = S * (1 + (s < 0 ? -1 : 1) * state.move);
   drawMarks(); renderHero(q);
+  if (broke) { $("heroLbl").textContent = "Deposit to start"; $("heroSub").textContent = `You have ${usd(lim.free, 2)} on Hyperliquid. Deposit at least $10 to trade.`; }
   if (!q) { animateTo(seriesFor(null), null); $("holdLegend").innerHTML = ""; ["mixBin", "mixSyn", "mixCash"].forEach(i => $(i).style.width = "0%"); $("warnLine").hidden = true; tweenText("stLoss", 0, () => "—"); tweenText("stSafe", 0, () => "—"); tweenText("stLev", 0, () => "—"); return; }
   tweenText("stLoss", -q.maxLoss, x => money(x));
   tweenText("stSafe", q.C - q.maxLoss, x => usd(x));
@@ -1061,7 +1065,33 @@ function setTab(t) {
 
 // ---------- controls ----------
 $("slider").addEventListener("input", () => { let v = +$("slider").value; if (Math.abs(v) < 4) v = 0; state.s = v; render(); });
-document.querySelectorAll(".amt").forEach(b => b.addEventListener("click", () => { state.C = +b.dataset.c; buzz(6); render(); }));
+// stake chips follow what you can actually stake: your free USDC on Hyperliquid, capped at your per-trade limit
+const DEMO_CHIPS = [100, 250, 500, 1000, 2500];
+const chipLabel = c => c >= 1000 ? (c / 1000) + "k" : String(c);
+function stakeLimit() {
+  if (typeof SETUP === "undefined" || !SETUP || !SETUP.signed_in || !SETUP.balances) return null;   // demo: paper money
+  const b = SETUP.balances, free = Math.max(0, (b.perp_withdrawable || 0) + (b.spot_usdc || 0)), cap = SETUP.max_stake || MAX_STAKE;
+  return { free, cap, max: Math.floor(Math.min(cap, free)) };
+}
+let chipKey = "";
+function renderStakeChips() {
+  const lim = stakeLimit();
+  if (lim && state.C > lim.max) state.C = Math.max(0, lim.max);               // never offer more than you have
+  const chips = !lim ? DEMO_CHIPS : [10, 20, 50, 100, 250, 500, 1000, 2500].filter(c => c < lim.max).slice(-4).concat(lim.max >= 10 ? [lim.max] : []);
+  const key = JSON.stringify([chips, state.C, lim && lim.max, lim && Math.round(lim.free * 100)]);
+  if (key === chipKey) return;
+  chipKey = key;
+  $("amts").innerHTML = lim && lim.max < 10 ? `<button class="amt amt-dep" data-dep="1">Deposit to trade</button>`
+    : chips.map(c => `<button class="amt" data-c="${c}" aria-pressed="${c === state.C}">${lim && c === lim.max ? "Max" : chipLabel(c)}</button>`).join("");
+  $("stakeAvail").hidden = !lim;
+  if (lim) $("stakeAvail").textContent = `of ${usd(lim.free, 2)} available` + (lim.free > lim.cap ? ` · ${usd(lim.cap)} per trade` : "");
+}
+$("amts").addEventListener("click", e => {
+  const b = e.target.closest(".amt");
+  if (!b) return;
+  if (b.dataset.dep) { openSetup(); return; }
+  state.C = +b.dataset.c; buzz(6); render(); renderDesk();
+});
 const knob = $("knob"), slide = $("slide"); let drag = null;
 function setSlide(px) { const max = slide.clientWidth - 60; const v = Math.max(0, Math.min(max, px)); knob.style.transform = `translateX(${v}px)`; $("slideFill").style.width = (v + 55) + "px"; $("slideTxt").style.opacity = 1 - v / max; return v / max; }
 knob.addEventListener("pointerdown", e => { drag = { x0: e.clientX }; knob.setPointerCapture(e.pointerId); });
@@ -1073,6 +1103,8 @@ async function place() {
   if (!q) { showToast("Pick a side first", "var(--ink2)"); return; }
   if (q.empty) { showToast(`Too small to trade: stake at least $${q.minStake} for this setting`, "var(--lev)"); return; }
   if (state.C > MAX_STAKE) { showToast(`Stake is above your ${usd(MAX_STAKE)} cap`, "var(--bear)"); return; }
+  const lim = stakeLimit();
+  if (lim && state.C > lim.free + 0.01) { showToast(`You have ${usd(lim.free, 2)} available. Deposit more or lower the stake.`, "var(--bear)"); openSetup(); return; }
   $("slideTxt").textContent = "Placing…";
   try {
     const p = await api("/v1/trades", { body: { s: state.s, stake: state.C, expected_max_loss: +q.maxLoss.toFixed(2) } });
@@ -1134,7 +1166,6 @@ addEventListener("resize", () => { if (isDesk()) drawDeskChart(); });
 
 // the dial and stake chips are the mobile ones, moved into the panel: just repaint the desk after them
 $("slider").addEventListener("input", () => renderDesk());
-document.querySelectorAll(".amt").forEach(b => b.addEventListener("click", () => renderDesk()));
 document.querySelectorAll("[data-tf]").forEach(b => b.addEventListener("click", () => { dk.tf = b.dataset.tf; document.querySelectorAll("[data-tf]").forEach(x => x.setAttribute("aria-pressed", x === b)); loadCandles(); }));
 document.querySelectorAll("[data-dl]").forEach(b => b.addEventListener("click", () => { dk.list = b.dataset.dl; document.querySelectorAll("[data-dl]").forEach(x => x.setAttribute("aria-pressed", x === b)); renderDeskLists(); }));
 $("dStake").addEventListener("click", () => place());
@@ -1171,6 +1202,12 @@ function renderDeskStats() {
 
 function renderDesk() {
   if (!isDesk() || !SNAP) return;
+  const lim = stakeLimit();
+  if (lim && lim.max < 10) {
+    $("dSum").innerHTML = `<div class="sub">You have ${usd(lim.free, 2)} on Hyperliquid. Deposit at least $10 to trade.</div>`;
+    $("dStake").textContent = "Deposit to trade"; $("dStake").disabled = false; $("dStake").classList.remove("bear");
+    $("dNote").textContent = ""; renderDeskStats(); renderDeskLists(); drawDeskChart(); return;
+  }
   const a = Math.abs(state.s), bull = state.s >= 0, q = quote(state.s, state.C, riskPct(state.s));
   if (q) {
     const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X);
@@ -1495,8 +1532,10 @@ async function withdrawUSDC(amount) {
   if (short_ > 0) { await signAction("usdClassTransfer", { amount: Math.ceil(short_ * 100) / 100, to_perp: true }); await loadSetup(); }
   await signAction("withdraw3", { amount });
 }
+setInterval(() => { if (SETUP && SETUP.signed_in && document.visibilityState === "visible") loadSetup(); }, 20000);
 async function loadSetup() {
   try { SETUP = await api("/v1/setup"); } catch (e) { SETUP = null; }
+  if (SNAP) render();
   if (SETUP && SETUP.signed_in) watchAccounts(ETH());
   renderSetupEntry();
   if (!$("setupSheet").hidden) renderSetup();
