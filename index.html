@@ -1011,6 +1011,13 @@ async function fetchPositions() {
   if (open.length) { $("livePnl").textContent = money(tot, 2); $("livePnl").className = "mono " + (tot >= 0 ? "pos" : "neg"); $("liveN").textContent = open.length + " live"; }
   return POS;
 }
+// what an open position pays if BTC finishes on its side of today's line (the binary pays $1 a contract); the old
+// "fair value" row used our own vol model, which can disagree with the market price, so it read as a wrong number
+function ifRight(p) {
+  const b = p.binary;
+  if (!b || !b.n) return null;
+  return { pays: b.n, win: b.n - b.cost, text: `If BTC ${p.bull ? "≥" : "<"} $${fmtPx(p.target)} at 06:00` };
+}
 async function renderPositions() {
   const list = await fetchPositions();
   if (!list) { $("posList").innerHTML = `<div class="card empty">Couldn't load positions.</div>`; return; }
@@ -1028,8 +1035,9 @@ async function renderPositions() {
       <div class="sub" style="font-size:.72rem">${open ? `${c.multiple >= 0 ? "+" : "−"}${Math.abs((c.multiple || 0) * 100).toFixed(0)}% on ${usd(c.at_risk, 2)} at risk` : p.cashout_fee ? `cash-out fee ${usd(p.cashout_fee, 2)}` : "held to settlement"}</div></div></div>
       <div class="kv">
         <div><span>Binary · ${b.n} ${p.bull ? "Yes" : "No"}</span><b>${usd(b.cost, 2)}${open ? " → " + usd(c.binary_value, 2) : b.payout !== undefined ? " → paid " + usd(b.payout, 2) : ""}</b></div>
-        <div><span>Synthetic ${p.bull ? "call" : "put"} ${fmtPx(y.strike)}</span><b>${y.units ? (open ? money(c.synthetic_pnl, 2) + " · " : "") + (SYN_STATUS[y.status] || y.status) : "off"}</b></div>
-        ${open ? `<div><span>If held to 06:00 (fair)</span><b>${money(m.pnl_fair, 2)}</b></div><div><span>Max loss</span><b>${usd(p.max_loss ?? p.max_loss_quoted, 2)}</b></div>` : ""}
+        ${y.units ? `<div><span>Synthetic ${p.bull ? "call" : "put"} ${fmtPx(y.strike)}</span><b>${(open ? money(c.synthetic_pnl, 2) + " · " : "") + (SYN_STATUS[y.status] || y.status)}</b></div>` : ""}
+        ${open && ifRight(p) ? `<div><span>${ifRight(p).text}</span><b class="pos">pays ${usd(ifRight(p).pays, 2)} · ${money(ifRight(p).win, 2)}${y.units ? " + option" : ""}</b></div>` : ""}
+        ${open ? `<div><span>Max loss</span><b>${usd(p.max_loss ?? p.max_loss_quoted, 2)}</b></div>` : ""}
       </div>
       ${y.units && open ? `<div class="ctrl"><div class="row"><span>Synthetic budget used</span><span class="mono">${used}%</span></div><div class="bar2"><span style="width:${Math.min(100, used)}%"></span></div></div>` : ""}
       ${p.error ? `<p class="warn" style="margin:0">${p.error}</p>` : ""}
@@ -1056,7 +1064,8 @@ function cashText() {
   $("cashBig").textContent = money(c.net_pnl, 2); $("cashBig").className = "big " + (c.net_pnl >= 0 ? "pos" : "neg");
   $("cashKv").innerHTML = `<div><span>You get back</span><b>${usd(c.you_get_back, 2)}</b></div><div><span>Binary sold at bid</span><b>${usd(c.binary_value, 2)}</b></div>
     <div><span>Synthetic closed</span><b>${money(c.synthetic_pnl, 2)}</b></div><div><span>Cathena fee (${c.fee_bps.binary / 100}% · ${c.fee_bps.perp / 100}%)</span><b>${usd(c.fee, 2)}</b></div>`;
-  $("cashSub").textContent = `Or hold: fair value at settlement ${money(p.mark.pnl_fair, 2)}. Prices move until you slide.`;
+  const r = ifRight(p);
+  $("cashSub").textContent = (r ? `Or hold: ${r.text.replace("If BTC", "if BTC")} UTC it pays ${usd(r.pays, 2)} (${money(r.win, 2)}).` : "Or hold: the option runs until 06:00 UTC.") + " Prices move until you slide.";
   document.documentElement.style.setProperty("--cash", c.net_pnl >= 0 ? "var(--bull)" : "var(--bear)");
   return p;
 }
@@ -1396,9 +1405,9 @@ function renderDeskLists() {
       : `<div class="sub" style="padding:14px">Nothing live yet. Pick a setup and stake.</div>`;
     $("dList").querySelectorAll("[data-cash]").forEach(r => r.addEventListener("click", () => openCashout(r.dataset.cash)));
   }
-  $("dPosTable").innerHTML = open.length ? `<table><thead><tr><th>Position</th><th>Stake</th><th>Cash out now</th><th>If held to 06:00</th><th>Max loss</th><th></th></tr></thead><tbody>${open.map(p => {
+  $("dPosTable").innerHTML = open.length ? `<table><thead><tr><th>Position</th><th>Stake</th><th>Cash out now</th><th>If right at 06:00</th><th>Max loss</th><th></th></tr></thead><tbody>${open.map(p => {
       const m = p.mark || {}, c = m.cashout || {}, v = c.net_pnl || 0;
-      return `<tr><td>${moodWord(p.s)}</td><td>${usd(p.stake)}</td><td class="${v >= 0 ? "pos" : "neg"}">${money(v, 2)} <small>${retPct(v, p.stake)}</small></td><td class="${(m.pnl_fair || 0) >= 0 ? "pos" : "neg"}">${money(m.pnl_fair || 0, 2)} <small>${retPct(m.pnl_fair || 0, p.stake)}</small></td><td>${usd(p.max_loss ?? p.max_loss_quoted ?? 0, 2)}</td>
+      return `<tr><td>${moodWord(p.s)}</td><td>${usd(p.stake)}</td><td class="${v >= 0 ? "pos" : "neg"}">${money(v, 2)} <small>${retPct(v, p.stake)}</small></td><td class="pos">${ifRight(p) ? `${money(ifRight(p).win, 2)} <small>pays ${usd(ifRight(p).pays, 0)}</small>` : "option runs"}</td><td>${usd(p.max_loss ?? p.max_loss_quoted ?? 0, 2)}</td>
         <td style="text-align:right"><button class="cbtn ${v >= 0 ? "" : "down"}" data-cash="${p.id}">Cash out</button></td></tr>`; }).join("")}</tbody></table>`
     : `<div class="sub" style="padding:10px 4px">No positions yet. Your trades show here with a live cash-out value.</div>`;
   $("dPosTable").querySelectorAll("[data-cash]").forEach(b => b.addEventListener("click", () => openCashout(b.dataset.cash)));
