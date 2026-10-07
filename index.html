@@ -505,7 +505,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
       </div>
       <div class="stats">
         <div class="stat"><b id="stLoss"></b><span>Max loss</span></div>
-        <div class="stat"><b id="stOdds"></b><span>Chance of profit</span></div>
+        <div class="stat"><b id="stSafe"></b><span>Never at risk</span></div>
         <div class="stat"><b id="stLev"></b><span>Leverage if it runs</span></div>
       </div>
     </div>
@@ -599,7 +599,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
 </svg>
   <header class="dt">
     <div class="dt-brand"><img src="/assets/cathena-logo-160.png" class="dt-logo" alt="">Cathena</div>
-    <nav class="dnav" aria-label="Sections"><button data-view="trade" aria-pressed="true">Trade</button><button data-view="admin" aria-pressed="false" id="navAdmin" hidden>Admin</button><a href="/docs"><svg class="ic"><use href="#i-sparkle"/></svg>How it works</a></nav>
+    <nav class="dnav" aria-label="Sections"><button data-view="trade" aria-pressed="true">Trade</button><a href="/docs"><svg class="ic"><use href="#i-sparkle"/></svg>How it works</a></nav>
     <div class="dt-tag"><b>Options, made easy.</b><span>One slider · max loss shown upfront · cash out any time</span></div>
     <div class="dt-right">
       <button class="dt-connect" id="dConnect" hidden>Connect wallet</button>
@@ -643,7 +643,6 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
       </div>
     </aside>
   </div>
-  <div class="dga" id="dAdminView" hidden><section class="panel lbp" id="dAdmin"></section></div>
   <div class="dgb" id="dBoardView" hidden><section class="panel lbp" id="dBoard"></section><aside class="lbside" id="dBoardMe"></aside></div>
   <footer class="dtick"><div id="dTick"></div><span class="dt-live"><span class="dot"></span> Live · Hyperliquid</span></footer>
 </div>
@@ -719,7 +718,10 @@ function quote(s, C, Lp) {
   const binBudget = M - synBudget;
   const book = bull ? SNAP.yes : SNAP.no;
   let bin = walk(book.asks, binBudget);
-  if (bin.cost < 10) { warns.bin = bin.n ? "Binary leg is under the $10 minimum, so it is skipped." : ""; bin = { n: 0, cost: 0, avg: book.asks[0][0] }; }
+  // Hyperliquid checks an outcome order's $10 minimum at the mid price, not the price paid
+  const mid = (book.bid + book.asks[0][0]) / 2, minN = Math.ceil(10 * 1.005 / mid);
+  const minStake = Math.ceil(minN * book.asks[0][0] * 1.01 / (Lp / 100));
+  if (bin.cost < 10 || bin.n < minN) { warns.bin = bin.n ? `Binary leg is under Hyperliquid's $10 minimum; stake at least $${minStake} for this setting.` : ""; bin = { n: 0, cost: 0, avg: book.asks[0][0] }; }
   const cash = C - bin.cost;
   const levNow = units ? units * Math.abs(dlt) * S / C : 0, levFull = units ? units * S / C : 0;   // on the whole amount
   const maxLoss = bin.cost + synBudget;
@@ -727,9 +729,9 @@ function quote(s, C, Lp) {
   const binP = X => ((bull ? X >= SNAP.target : X < SNAP.target) ? bin.n : 0) - bin.cost;
   const synP = (X, c) => units ? Math.max(units * pay(X) - c * units * f, -synBudget) : 0;
   const pnl = X => binP(X) + synP(X, EXP_COST);
-  return { s, bull, a, C, Lp, M, wSyn, K, f, dlt, delta, units, unitsCap, capped, synBudget, bin, book, cash, levNow, levFull, maxLoss, pnl, binP, synP, warns };
+  const empty = !bin.n && !units;   // nothing clears the minimums: nothing to stake
+  return { s, bull, a, C, Lp, M, wSyn, K, f, dlt, delta, units, unitsCap, capped, synBudget, bin, book, cash, levNow, levFull, maxLoss, pnl, binP, synP, warns, minStake, empty };
 }
-function probProfit(q) { let p = 0, w = 0; for (let z = -4; z <= 4; z += 0.02) { const X = S * Math.exp(z * sT - 0.5 * sT * sT), d = phi(z); w += d; if (q.pnl(X) > 0) p += d; } return p / w; }
 
 
 // ---------- formatting ----------
@@ -761,7 +763,7 @@ function renderHeader() {
 }
 
 // ---------- dial ----------
-const ZONES = [{ name: "Steady", sub: "Higher odds, capped win", toast: "Steady · higher odds" }, { name: "Bold", sub: "Bigger payoff if you're right", toast: "Bold · bigger payoff" }, { name: "Moonshot", sub: "Max payoff on a big move", toast: "Moonshot · max payoff" },
+const ZONES = [{ name: "Steady", sub: "Smallest risk, capped win", toast: "Steady · smallest risk" }, { name: "Bold", sub: "Bigger payoff if you're right", toast: "Bold · bigger payoff" }, { name: "Moonshot", sub: "Max payoff on a big move", toast: "Moonshot · max payoff" },
   { name: "All in", sub: "Lose it all if wrong, biggest payout if right", toast: "All in · all or nothing" }];
 const zoneOf = s => s === 0 ? 0 : (Math.abs(s) <= 33 ? 1 : Math.abs(s) <= 66 ? 2 : Math.abs(s) < ALL_IN ? 3 : 4) * Math.sign(s);
 const moodWord = s => { const a = Math.abs(s); if (!a) return "Neutral"; const side = s > 0 ? "bullish" : "bearish"; return a < 20 ? "Slightly " + side : a < 45 ? side[0].toUpperCase() + side.slice(1) : a < 75 ? "Very " + side : a < ALL_IN ? "Max " + side : "All-in " + side; };
@@ -899,9 +901,9 @@ function render() {
   // scenario pin follows the side
   if (state.move !== null) state.pin = S * (1 + (s < 0 ? -1 : 1) * state.move);
   drawMarks(); renderHero(q);
-  if (!q) { animateTo(seriesFor(null), null); $("holdLegend").innerHTML = ""; ["mixBin", "mixSyn", "mixCash"].forEach(i => $(i).style.width = "0%"); $("warnLine").hidden = true; tweenText("stLoss", 0, () => "—"); tweenText("stOdds", 0, () => "—"); tweenText("stLev", 0, () => "—"); return; }
+  if (!q) { animateTo(seriesFor(null), null); $("holdLegend").innerHTML = ""; ["mixBin", "mixSyn", "mixCash"].forEach(i => $(i).style.width = "0%"); $("warnLine").hidden = true; tweenText("stLoss", 0, () => "—"); tweenText("stSafe", 0, () => "—"); tweenText("stLev", 0, () => "—"); return; }
   tweenText("stLoss", -q.maxLoss, x => money(x));
-  tweenText("stOdds", probProfit(q) * 100, x => Math.round(x) + "%");
+  tweenText("stSafe", q.C - q.maxLoss, x => usd(x));
   tweenText("stLev", q.levFull, x => q.units ? x.toFixed(1) + "x" : "—");
   const pb = q.bin.cost / C * 100, ps = q.synBudget / C * 100;
   $("mixBin").style.width = pb + "%"; $("mixSyn").style.width = ps + "%"; $("mixCash").style.width = Math.max(0, 100 - pb - ps) + "%";
@@ -1069,6 +1071,7 @@ knob.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") 
 async function place() {
   const q = quote(state.s, state.C, riskPct(state.s)); setSlide(0);
   if (!q) { showToast("Pick a side first", "var(--ink2)"); return; }
+  if (q.empty) { showToast(`Too small to trade: stake at least $${q.minStake} for this setting`, "var(--lev)"); return; }
   if (state.C > MAX_STAKE) { showToast(`Stake is above your ${usd(MAX_STAKE)} cap`, "var(--bear)"); return; }
   $("slideTxt").textContent = "Placing…";
   try {
@@ -1114,8 +1117,8 @@ const DESK = matchMedia("(min-width: 1100px)");
 const isDesk = () => document.body.classList.contains("is-desk");
 const dk = { tf: "15m", list: "setups", candles: [], ticker: [], acct: null };
 const ZNAME = a => a <= 33 ? "Steady" : a <= 66 ? "Bold" : a < ALL_IN ? "Moonshot" : "All in";
-const SETUPS = [[-100, "Bear", "All in", "lose it all or win big"], [-88, "Bear", "Moonshot", "max payoff on a big drop"], [-55, "Bear", "Bold", "bigger payoff if it falls"], [-25, "Bear", "Steady", "higher odds, capped win"],
-  [25, "Bull", "Steady", "higher odds, capped win"], [55, "Bull", "Bold", "bigger payoff if it rises"], [88, "Bull", "Moonshot", "max payoff on a big move"], [100, "Bull", "All in", "lose it all or win big"]];
+const SETUPS = [[-100, "Bear", "All in", "lose it all or win big"], [-88, "Bear", "Moonshot", "max payoff on a big drop"], [-55, "Bear", "Bold", "bigger payoff if it falls"], [-25, "Bear", "Steady", "smallest risk, capped win"],
+  [25, "Bull", "Steady", "smallest risk, capped win"], [55, "Bull", "Bold", "bigger payoff if it rises"], [88, "Bull", "Moonshot", "max payoff on a big move"], [100, "Bull", "All in", "lose it all or win big"]];
 
 function arrange() {
   const want = DESK.matches;
@@ -1170,15 +1173,14 @@ function renderDesk() {
   if (!isDesk() || !SNAP) return;
   const a = Math.abs(state.s), bull = state.s >= 0, q = quote(state.s, state.C, riskPct(state.s));
   if (q) {
-    const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X), pp = probProfit(q);
+    const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X);
     $("dSum").innerHTML = `<div class="sub" style="font-size:.82rem">If BTC is ${bull ? "up" : "down"} 3% by 06:00</div>
       <div class="big2 ${v >= 0 ? "pos" : "neg"}">${retPct(v, state.C)}</div><div class="sub" style="font-size:.84rem;margin-top:-6px">${money(v)} on your ${usd(state.C)} stake</div>
       <div class="row" style="font-size:.84rem"><span class="sub">You can lose at most</span><b class="mono">${usd(q.maxLoss)}</b></div>
-      <div class="row" style="font-size:.84rem"><span class="sub">Never at risk</span><b class="mono">${usd(state.C - q.maxLoss)}</b></div>
-      <div class="row" style="font-size:.84rem"><span class="sub">Chance of profit</span><b class="mono">${Math.round(pp * 100)}%</b></div><div class="meter2"><span style="width:${pp * 100}%"></span></div>`;
-    $("dStake").textContent = `Stake ${usd(state.C)} · ${bull ? "Bull" : "Bear"} ${ZNAME(a)}`;
+      <div class="row" style="font-size:.84rem"><span class="sub">Never at risk</span><b class="mono">${usd(state.C - q.maxLoss)}</b></div>`;
+    $("dStake").textContent = q.empty ? `Stake at least $${q.minStake} for ${ZNAME(a)}` : `Stake ${usd(state.C)} · ${bull ? "Bull" : "Bear"} ${ZNAME(a)}`;
     $("dStake").classList.toggle("bear", !bull);
-    $("dStake").disabled = false;
+    $("dStake").disabled = q.empty;
   } else { $("dSum").innerHTML = `<div class="sub">Slide left for bearish, right for bullish.</div>`; $("dStake").textContent = "Move the slider"; $("dStake").disabled = true; }
   $("dNote").textContent = MODE === "live" ? "Live on Hyperliquid · trading key can't withdraw" : CLEAN ? "Settles 06:00 UTC · cash out any time" : "Dry run · nothing is sent";
   renderDeskStats(); renderDeskLists(); drawDeskChart();
@@ -1267,8 +1269,8 @@ function bindWins() { $("dBoard").querySelectorAll("[data-win]").forEach(x => x.
 function setView(v) {
   dk.view = v;
   document.querySelectorAll("[data-view]").forEach(x => x.setAttribute("aria-pressed", x.dataset.view === v));
-  $("dTradeView").hidden = v !== "trade"; $("dBoardView").hidden = v !== "board"; $("dAdminView").hidden = v !== "admin";
-  if (v === "board") renderBoard(); else if (v === "admin") loadAdmin(); else { renderDesk(); }
+  $("dTradeView").hidden = v !== "trade"; $("dBoardView").hidden = v !== "board";
+  if (v === "board") renderBoard(); else { renderDesk(); }
   scrollTo({ top: 0 });
 }
 document.querySelectorAll("[data-view]").forEach(x => x.addEventListener("click", () => setView(x.dataset.view)));
@@ -1506,7 +1508,6 @@ function renderSetupEntry() {
   $("dConnect").hidden = !!ready; $("dConnect").textContent = label;
   document.querySelectorAll("#desk .dt-bal").forEach(e => e.hidden = !ready && !DEMO);
   $("mSetupBtn").textContent = ready ? "Manage" : label;
-  $("navAdmin").hidden = !(s && s.owner);
   // demo banner: say plainly that a visitor is on paper money, and how to go real
   const signed = s && s.signed_in;
   document.querySelectorAll("[data-demo]").forEach(bar => {
@@ -1590,34 +1591,6 @@ function pollDeposit() {
 }
 
 
-// ---------- owner admin: invites, users, pause, wind down ----------
-async function loadAdmin() {
-  let d;
-  try { d = await api("/v1/admin/users"); } catch (e) { $("dAdmin").innerHTML = `<div class="sub">${e.message}</div>`; return; }
-  const link = c => `${location.origin}/?invite=${encodeURIComponent(c)}`;
-  const codes = d.invites.map(c => `<div class="adm-code"><b>🎟️ ${c.code}</b><small>${c.uses} / ${c.max} used${c.ends ? ` · until ${c.ends}` : " · no end date"}</small>
-      <code class="adm-link">${link(c.code)}</code>
-      <div style="display:flex;gap:6px"><button class="adm-btn" data-copy="${link(c.code)}">Copy link</button><button class="adm-btn warn" data-wind="${c.code}">Wind down cohort</button></div></div>`).join("") || `<div class="sub">No invite codes. Set INVITE_CODES in .env.</div>`;
-  const rows = d.users.map(u => `<tr><td><b>${short(u.address)}</b><div class="sub" style="font-size:.74rem">${u.invite ? "🎟️ " + u.invite : "list"} · ${new Date(u.created).toISOString().slice(0, 10)}${u.terms_version ? " · terms v" + u.terms_version : ""}</div></td>
-      <td class="num">${u.balance == null ? "—" : usd(u.balance, 2)}</td><td class="num">${u.open_positions}</td><td class="num">${usd(u.at_risk, 2)}</td>
-      <td class="num ${u.pnl >= 0 ? "pos" : "neg"}">${money(u.pnl, 2)}</td>
-      <td>${u.blocked ? `<span class="neg" style="font-size:.8rem">${u.disabled ? "Paused" : "Access ended"}</span>` : u.agent_approved ? `<span class="pos" style="font-size:.8rem">Active</span>` : `<span class="sub" style="font-size:.8rem">Setting up</span>`}</td>
-      <td style="text-align:right;white-space:nowrap">${u.address === SETUP.address ? `<span class="sub" style="font-size:.78rem">you (owner)</span>` : `<button class="adm-btn" data-pause="${u.address}" data-v="${!u.disabled}">${u.disabled ? "Unpause" : "Pause"}</button>`}
-        ${u.open_positions ? `<button class="adm-btn warn" data-close="${u.address}">Close all</button>` : ""}</td></tr>`).join("");
-  $("dAdmin").innerHTML = `<div class="lbh"><div><h2>Admin</h2><p>Pausing stops new trades; users can always cash out and withdraw. Funds never leave their own accounts.</p></div></div>
-    <div class="adm-codes">${codes}</div>
-    <table class="lbt"><thead><tr><th>User</th><th class="num">On Hyperliquid</th><th class="num">Open</th><th class="num">At risk</th><th class="num">P&amp;L</th><th>Status</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="7" class="sub">No users yet.</td></tr>`}</tbody></table>`;
-  const act = async (fn, msg) => { if (!confirm(msg)) return; try { await fn(); } catch (e) { showToast(e.message, "var(--bear)"); } loadAdmin(); };
-  $("dAdmin").querySelectorAll("[data-pause]").forEach(b => b.onclick = () => act(() => api(`/v1/admin/users/${b.dataset.pause}`, { body: { disabled: b.dataset.v === "true" } }),
-    `${b.dataset.v === "true" ? "Pause" : "Unpause"} ${short(b.dataset.pause)}?`));
-  $("dAdmin").querySelectorAll("[data-close]").forEach(b => b.onclick = () => act(() => api("/v1/admin/wind-down", { body: { address: b.dataset.close, disable: false } }),
-    `Cash out every open position for ${short(b.dataset.close)} at market now?`));
-  $("dAdmin").querySelectorAll("[data-copy]").forEach(b => b.onclick = async () => {
-    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied ✓"; } catch (e) { b.textContent = "Select the link above"; }
-    setTimeout(() => b.textContent = "Copy link", 1600); });
-  $("dAdmin").querySelectorAll("[data-wind]").forEach(b => b.onclick = () => act(() => api("/v1/admin/wind-down", { body: { invite: b.dataset.wind, disable: true } }),
-    `Wind down '${b.dataset.wind}': cash out all their positions now and pause every account that joined with it?`));
-}
 refresh(); setInterval(refresh, 3000); renderPositions(); livePoll(); arrange(); loadSetup().then(s => { if (INVITE && !(s && s.ready)) openSetup(); });
 
 </script>
