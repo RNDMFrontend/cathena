@@ -716,16 +716,25 @@ function quote(s, C, Lp) {
   const warns = { syn: "", bin: "" };
   const MINO = minOrder();
   if (units * Math.abs(dlt) * S < MINO || units <= 0) { if (wSyn > 0.05) warns.syn = Lp >= 100 ? "All in: the whole stake goes on today's line." : "Below the $10 perp minimum. Add amount to switch it on."; units = 0; }
-  const capped = units > 0 && wSyn > 0.98;
+  let capped = units > 0 && wSyn > 0.98;
   if (capped) warns.syn = "Using all the margin this amount allows. Add amount to unlock more convexity.";
-  const synBudget = CUSHION * units * f;
+  let synBudget = CUSHION * units * f;
   const binBudget = M - synBudget;
   const book = bull ? SNAP.yes : SNAP.no;
   let bin = walk(book.asks, binBudget);
   // Hyperliquid checks an outcome order's $10 minimum at the mid price, not the price paid
   const mid = (book.bid + book.asks[0][0]) / 2, minN = Math.ceil(MINO * 1.005 / mid);
   const minStake = Math.ceil(minN * book.asks[0][0] * 1.01 / (Lp / 100));
-  if (bin.cost < MINO || bin.n < minN || !bin.n) { warns.bin = bin.n ? "Binary leg is under Hyperliquid's $10 minimum at this stake; raise the stake to trade this setting." : ""; bin = { n: 0, cost: 0, avg: book.asks[0][0] }; }
+  if (bin.cost < MINO || bin.n < minN || !bin.n) {
+    warns.bin = bin.n ? "Binary leg is under Hyperliquid's $10 minimum at this stake; raise the stake to trade this setting." : "";
+    bin = { n: 0, cost: 0, avg: book.asks[0][0] };
+    // small stake: the whole max loss runs as the option instead (same as app/engine/quote.py)
+    const fb = f > 0 ? Math.floor(Math.min(unitsCap, M / (CUSHION * f)) * 1e5) / 1e5 : 0;
+    if (fb > 0 && fb * Math.abs(dlt) * S >= MINO && MINO > 0) {
+      units = fb; synBudget = CUSHION * fb * f; capped = fb >= unitsCap - 1e-9;
+      warns.bin = ""; warns.syn = "Small stake: the whole position runs as the option, without the daily binary.";
+    }
+  }
   const cash = C - bin.cost;
   const levNow = units ? units * Math.abs(dlt) * S / C : 0, levFull = units ? units * S / C : 0;   // on the whole amount
   const maxLoss = bin.cost + synBudget;
@@ -1090,7 +1099,7 @@ function minTradable(s) {
   if (MIN_CACHE.has(key)) return MIN_CACHE.get(key);
   if (MIN_CACHE.size > 400) MIN_CACHE.clear();
   const Lp = riskPct(s); let lo = 1, hi = 20000, best = null;
-  while (lo <= hi) { const m = (lo + hi) >> 1, q = quote(s, m, Lp); if (q && q.bin.n) { best = m; hi = m - 1; } else lo = m + 1; }
+  while (lo <= hi) { const m = (lo + hi) >> 1, q = quote(s, m, Lp); if (q && (q.bin.n || q.units)) { best = m; hi = m - 1; } else lo = m + 1; }
   MIN_CACHE.set(key, best);
   return best;
 }
@@ -1098,9 +1107,10 @@ function minTradable(s) {
 function tradableQuote(s, C) {
   const Lp = riskPct(s);
   if (!Lp) return { q: null, short: false };
+  const MIN_STAKE = minOrder() ? 10 : 0;           // real accounts: $10 is the smallest stake
   const q = C >= 1 ? quote(s, C, Lp) : null;
-  if (q && q.bin.n) return { q, short: false };
-  const need = minTradable(s);
+  if (q && (q.bin.n || q.units) && C >= MIN_STAKE) return { q, short: false };
+  const need = Math.max(MIN_STAKE, minTradable(s) || 0);
   if (!need) return { q, short: false };
   const base = quote(s, need, Lp);
   return { q: C >= 1 ? scaleQuote(base, C / need) : base, short: true, need };
@@ -1143,7 +1153,7 @@ async function place() {
   if (lim0 && lim0.max < 10) { setSlide(0); const need = minTradable(state.s) || 10; showToast(`Deposit ${usd(Math.ceil(need - lim0.free))} more to place this trade`, "var(--lev)"); openSetup(); return; }
   const q = quote(state.s, state.C, riskPct(state.s)); setSlide(0);
   if (!q) { showToast("Pick a side first", "var(--ink2)"); return; }
-  if (!q.bin.n) {
+  if (!q.bin.n && !q.units) {
     const need = minTradable(state.s), l = stakeLimit();
     if (l && need && l.free < need) { showToast(`Deposit ${usd(Math.ceil(need - l.free))} more to place this trade`, "var(--lev)"); openSetup(); }
     else showToast(`This trade needs a stake of ${usd(need || 10)}`, "var(--lev)");
@@ -1595,7 +1605,7 @@ function renderSetupEntry() {
   document.querySelectorAll("[data-demo]").forEach(bar => {
     bar.hidden = !!ready || DEMO;
     bar.querySelector("[data-demo-txt]").innerHTML = signed ? "<b>Almost there.</b> Finish set up to trade from your own account."
-      : "<b>Demo mode:</b> you're trading paper money. Connect a wallet to trade for real, from $5.";
+      : "<b>Demo mode:</b> you're trading paper money. Connect a wallet to trade for real, from $10.";
     bar.querySelector("[data-demo-btn]").textContent = signed ? "Finish set up" : "Connect wallet";
   });
   $("demoWrap").hidden = !!ready || DEMO;
