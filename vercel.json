@@ -3,7 +3,9 @@
   "rewrites": [
     { "source": "/v1/:path*", "destination": "https://api-cathena.rndm.io/v1/:path*" },
     { "source": "/media/:path*", "destination": "https://api-cathena.rndm.io/media/:path*" },
-    { "source": "/watch", "destination": "https://api-cathena.rndm.io/watch" }
+    { "source": "/watch", "destination": "https://api-cathena.rndm.io/watch" },
+    { "source": "/docs", "destination": "https://api-cathena.rndm.io/docs" },
+    { "source": "/docs.md", "destination": "https://api-cathena.rndm.io/docs.md" }
   ],
   "headers": [
     { "source": "/(.*)", "headers": [
