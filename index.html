@@ -68,7 +68,9 @@ button { font: inherit; color: inherit; }
 .mood small { display: block; font-family: var(--f-body); font-weight: 600; font-size: .85rem; color: var(--ink2); letter-spacing: 0; margin-top: 6px; }
 .dial { position: relative; height: 80px; touch-action: none; user-select: none; }
 .dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.dial input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: grab; }
+.dial input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: grab; -webkit-appearance: none; appearance: none; background: none; }
+.dial input::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 80px; }
+.dial input::-moz-range-thumb { width: 30px; height: 80px; border: 0; }
 .zones { display: grid; grid-template-columns: repeat(6, 1fr); font-size: .66rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .07em; font-weight: 700; text-align: center; margin-top: -6px; }
 .zones span.on { color: var(--ink); }
 .toast { position: absolute; left: 50%; top: 10px; transform: translate(-50%, -6px) scale(.96); opacity: 0; pointer-events: none; padding: 7px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700; background: var(--s3); border: 1px solid var(--line); white-space: nowrap; transition: opacity .2s, transform .25s cubic-bezier(.2,1.4,.4,1); z-index: 2; }
@@ -474,8 +476,8 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
         <span class="pill mono" id="sval"></span>
       </div>
       <div class="dial">
-        <svg id="dialSvg" viewBox="0 0 400 80" preserveAspectRatio="none" aria-hidden="true"></svg>
-        <input id="slider" type="range" min="-100" max="100" step="1" value="70" aria-label="Your view on BTC by 06:00 UTC, from max bearish to max bullish">
+        <svg id="dialSvg" viewBox="0 0 400 80" aria-hidden="true"></svg>
+        <input id="slider" type="range" min="-100" max="100" step="1" value="50" aria-label="Your view on BTC by 06:00 UTC, from max bearish to max bullish">
       </div>
       <div class="zones" aria-hidden="true"><span data-z="-3">Moonshot</span><span data-z="-2">Bold</span><span data-z="-1">Steady</span><span data-z="1">Steady</span><span data-z="2">Bold</span><span data-z="3">Moonshot</span></div>
       <div class="stake">
@@ -771,11 +773,14 @@ const ZONES = [{ name: "Steady", sub: "Smallest risk, capped win", toast: "Stead
 const zoneOf = s => s === 0 ? 0 : (Math.abs(s) <= 33 ? 1 : Math.abs(s) <= 66 ? 2 : Math.abs(s) < ALL_IN ? 3 : 4) * Math.sign(s);
 const moodWord = s => { const a = Math.abs(s); if (!a) return "Neutral"; const side = s > 0 ? "bullish" : "bearish"; return a < 20 ? "Slightly " + side : a < 45 ? side[0].toUpperCase() + side.slice(1) : a < 75 ? "Very " + side : a < ALL_IN ? "Max " + side : "All-in " + side; };
 function drawDial(s) {
-  const mid = 200, y = 42, x = v => mid + v / 100 * 188, col = s >= 0 ? "#36e3c8" : "#ff6f7d";
+  // drawn in real pixels (viewBox = the dial's width), on exactly the native slider's scale: 15px in from each edge
+  const svg = $("dialSvg"), W = Math.max(200, Math.round(svg.getBoundingClientRect().width) || 400), TH = 15;
+  svg.setAttribute("viewBox", `0 0 ${W} 80`);
+  const mid = W / 2, y = 42, x = v => TH + (v + 100) / 200 * (W - 2 * TH), col = s >= 0 ? "#36e3c8" : "#ff6f7d";
   let g = `<defs><linearGradient id="dg" x1="0" x2="1"><stop offset="0" stop-color="#ff6f7d"/><stop offset=".5" stop-color="#26324a"/><stop offset="1" stop-color="#36e3c8"/></linearGradient><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>`;
   [[-ALL_IN, -66, "#ffc857", .06], [-66, -33, "#2ea8ff", .06], [33, 66, "#2ea8ff", .06], [66, ALL_IN, "#ffc857", .06], [-100, -ALL_IN, "#ff4d6d", .22], [ALL_IN, 100, "#ff4d6d", .22]]
     .forEach(([a, b, c, o]) => g += `<rect x="${x(a)}" y="${y - 22}" width="${x(b) - x(a)}" height="44" fill="${c}" opacity="${o}" rx="${Math.abs(a) >= ALL_IN ? 4 : 8}"/>`);
-  g += `<rect x="12" y="${y - 4}" width="376" height="8" rx="4" fill="url(#dg)" opacity=".55"/>`;
+  g += `<rect x="${TH}" y="${y - 4}" width="${W - 2 * TH}" height="8" rx="4" fill="url(#dg)" opacity=".55"/>`;
   for (let v = -100; v <= 100; v += 10) g += `<line x1="${x(v)}" x2="${x(v)}" y1="${y + 12}" y2="${y + (v % 50 === 0 ? 22 : 17)}" stroke="#2c3a52" stroke-width="1.5"/>`;
   [-ALL_IN, -66, -33, 33, 66, ALL_IN].forEach(v => g += `<line x1="${x(v)}" x2="${x(v)}" y1="${y - 20}" y2="${y + 22}" stroke="#26324a" stroke-dasharray="2 3"/>`);
   g += `<rect x="${Math.min(mid, x(s))}" y="${y - 4}" width="${Math.abs(x(s) - mid)}" height="8" rx="4" fill="${col}"/>`;
@@ -894,6 +899,7 @@ function render() {
   if (lim && !broke) { const need = minTradable(state.s); if (need && state.C < need && lim.max >= need) { state.C = need; renderStakeChips(); } }
   const { s, C } = state, Lp = riskPct(s), tq = tradableQuote(s, C), q = tq.q;
   document.documentElement.style.setProperty("--side", s < 0 ? "var(--bear)" : "var(--bull)");
+  if (document.activeElement !== $("slider") || +$("slider").value !== s) $("slider").value = s;
   drawDial(s);
   const z = zoneOf(s);
   document.querySelectorAll(".zones span").forEach(e => e.classList.toggle("on", +e.dataset.z === Math.sign(z) * Math.min(3, Math.abs(z))));
@@ -1203,7 +1209,7 @@ function arrange() {
   else { if (dk.home) dk.home[0].insertBefore(card, dk.home[1]); setTab(state.tab); if (SNAP) render(); }
 }
 DESK.addEventListener("change", arrange);
-addEventListener("resize", () => { if (isDesk()) drawDeskChart(); });
+addEventListener("resize", () => { if (isDesk()) drawDeskChart(); drawDial(state.s); });
 
 // the dial and stake chips are the mobile ones, moved into the panel: just repaint the desk after them
 $("slider").addEventListener("input", () => renderDesk());
