@@ -833,6 +833,7 @@ function drawDial(s) {
   const mid = W / 2, y = 42, x = v => TH + (v + 100) / 200 * (W - 2 * TH), col = s >= 0 ? "#36e3c8" : "#ff6f7d";
   let g = `<defs><linearGradient id="dg" x1="0" x2="1"><stop offset="0" stop-color="#ff6f7d"/><stop offset=".5" stop-color="#26324a"/><stop offset="1" stop-color="#36e3c8"/></linearGradient><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>`;
   [[-ALL_IN, -66, "#ffc857", .06], [-66, -33, "#2ea8ff", .06], [33, 66, "#2ea8ff", .06], [66, ALL_IN, "#ffc857", .06], [-100, -ALL_IN, "#ff4d6d", .22], [ALL_IN, 100, "#ff4d6d", .22]]
+    .filter(([a]) => !(Math.abs(a) >= ALL_IN && moonOff(a > 0)))
     .forEach(([a, b, c, o]) => g += `<rect x="${x(a)}" y="${y - 22}" width="${x(b) - x(a)}" height="44" fill="${c}" opacity="${o}" rx="${Math.abs(a) >= ALL_IN ? 4 : 8}"/>`);
   g += `<rect x="${TH}" y="${y - 4}" width="${W - 2 * TH}" height="8" rx="4" fill="url(#dg)" opacity=".55"/>`;
   for (let v = -100; v <= 100; v += 10) g += `<line x1="${x(v)}" x2="${x(v)}" y1="${y + 12}" y2="${y + (v % 50 === 0 ? 22 : 17)}" stroke="#2c3a52" stroke-width="1.5"/>`;
@@ -843,7 +844,11 @@ function drawDial(s) {
 }
 
 // ---------- risk follows the dial: 20% of stake at the mild end, 50% at max ----------
-const ALL_IN = 95, MOON_MAX_PX = 0.75;   // |dial| 95–100: max loss ramps 50% → 100% (same as app/engine/quote.py)
+const ALL_IN = 95, MOON_MAX_PX = 0.75;
+// Moonshot is hidden on a side whose binary already costs MOON_MAX_PX or more (BTC is already well on that side of the
+// line, so all in would pay little): the dial stops at that side's Aggressive end. The server refuses it too.
+const moonOff = bull => { if (typeof SNAP === "undefined" || !SNAP) return false; const b = bull ? SNAP.yes : SNAP.no; return !!(b && b.asks && b.asks.length && b.asks[0][0] >= MOON_MAX_PX); };
+const dialClamp = v => Math.abs(v) >= ALL_IN && moonOff(v > 0) ? Math.sign(v) * (ALL_IN - 1) : v;   // |dial| 95–100: max loss ramps 50% → 100% (same as app/engine/quote.py)
 const riskPct = s => { const a = Math.abs(s); return !a ? 0 : a < ALL_IN ? Math.round((20 + 30 * a / 100) / 5) * 5 : Math.round((50 + 50 * (a - ALL_IN) / (100 - ALL_IN)) / 5) * 5; };
 
 // ---------- chart ----------
@@ -952,6 +957,7 @@ function render() {
   if (lim && state.C < 10 && lim.max >= 10) state.C = Math.min(lim.max, 20);    // just funded: start from a stake that can trade
   renderStakeChips();                                                          // clamps the stake to what you have
   if (lim && !broke) { const need = stakeNeed(state.s); if (need && state.C < need && lim.max >= need) { state.C = need; renderStakeChips(); } }
+  state.s = dialClamp(state.s);
   const { s, C } = state, Lp = riskPct(s), tq = tradableQuote(s, C), q = tq.q;
   document.documentElement.style.setProperty("--side", s < 0 ? "var(--bear)" : "var(--bull)");
   if (document.activeElement !== $("slider") || +$("slider").value !== s) $("slider").value = s;
@@ -1130,7 +1136,7 @@ function setTab(t) {
 ["trade", "positions", "account"].forEach(k => $("nav-" + k).addEventListener("click", () => setTab(k)));
 
 // ---------- controls ----------
-$("slider").addEventListener("input", () => { let v = +$("slider").value; if (Math.abs(v) < 4) v = 0; state.s = v; render(); });
+$("slider").addEventListener("input", () => { let v = +$("slider").value; if (Math.abs(v) < 4) v = 0; v = dialClamp(v); if (v !== +$("slider").value) $("slider").value = v; state.s = v; render(); });
 // when your stake (or balance) is under what a setting needs, preview it at the smallest stake that trades
 // Hyperliquid's $10 order minimum for signed-in accounts; the demo is paper money and takes any stake
 const minOrder = () => (typeof SETUP !== "undefined" && SETUP && SETUP.signed_in) ? 10 : 0;
@@ -1376,7 +1382,7 @@ function renderDeskLists() {
   $("dLiveN").textContent = open.length || "";
   $("dPosN").textContent = open.length ? `(${open.length} live)` : "";
   if (dk.list === "setups") {
-    $("dList").innerHTML = SETUPS.map(([s, side, z, sub]) => {
+    $("dList").innerHTML = SETUPS.filter(([s]) => dialClamp(s) === s).map(([s, side, z, sub]) => {
       const { q } = tradableQuote(s, state.C), X = S * (1 + (s > 0 ? 0.03 : -0.03)), v = q ? q.pnl(X) : 0, on = Math.sign(s) === Math.sign(state.s) && ZNAME(Math.abs(s)) === ZNAME(Math.abs(state.s));
       return `<div class="srow ${on ? "on" : ""}" data-s="${s}">${zoneAvatar(s)}
         <div><b>${side} · ${z}</b><small>${sub}</small></div><div class="r"><span class="${v >= 0 ? "pos" : "neg"}">${retPct(v, q ? q.C : 0)}</span><small>if BTC ${s > 0 ? "+" : "−"}3%</small></div></div>`;
