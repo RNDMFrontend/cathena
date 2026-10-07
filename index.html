@@ -706,7 +706,7 @@ function quote(s, C, Lp) {
   if (CUSHION * units * f > 0.6 * M) units = 0.6 * M / (CUSHION * f);     // keep at least 40% of the budget for the binary
   units = Math.floor(units * 1e5) / 1e5;
   const warns = { syn: "", bin: "" };
-  if (units * Math.abs(dlt) * S < 10) { if (wSyn > 0.05) warns.syn = Lp >= 100 ? "At 100% max loss there is no spare cash for perp margin, so the binary carries the whole view." : "Below the $10 perp minimum. Add amount to switch it on."; units = 0; }
+  if (units * Math.abs(dlt) * S < 10) { if (wSyn > 0.05) warns.syn = Lp >= 100 ? "All in: the whole stake goes on today's line." : "Below the $10 perp minimum. Add amount to switch it on."; units = 0; }
   const capped = units > 0 && wSyn > 0.98;
   if (capped) warns.syn = "Using all the margin this amount allows. Add amount to unlock more convexity.";
   const synBudget = CUSHION * units * f;
@@ -753,23 +753,26 @@ function renderHeader() {
 }
 
 // ---------- dial ----------
-const ZONES = [{ name: "Steady", sub: "Higher odds, capped win", toast: "Steady · higher odds" }, { name: "Bold", sub: "Bigger payoff if you're right", toast: "Bold · bigger payoff" }, { name: "Moonshot", sub: "Max payoff on a big move", toast: "Moonshot · max payoff" }];
-const zoneOf = s => s === 0 ? 0 : (Math.abs(s) <= 33 ? 1 : Math.abs(s) <= 66 ? 2 : 3) * Math.sign(s);
-const moodWord = s => { const a = Math.abs(s); if (!a) return "Neutral"; const side = s > 0 ? "bullish" : "bearish"; return a < 20 ? "Slightly " + side : a < 45 ? side[0].toUpperCase() + side.slice(1) : a < 75 ? "Very " + side : "Max " + side; };
+const ZONES = [{ name: "Steady", sub: "Higher odds, capped win", toast: "Steady · higher odds" }, { name: "Bold", sub: "Bigger payoff if you're right", toast: "Bold · bigger payoff" }, { name: "Moonshot", sub: "Max payoff on a big move", toast: "Moonshot · max payoff" },
+  { name: "All in", sub: "Lose it all if wrong, biggest payout if right", toast: "All in · all or nothing" }];
+const zoneOf = s => s === 0 ? 0 : (Math.abs(s) <= 33 ? 1 : Math.abs(s) <= 66 ? 2 : Math.abs(s) < ALL_IN ? 3 : 4) * Math.sign(s);
+const moodWord = s => { const a = Math.abs(s); if (!a) return "Neutral"; const side = s > 0 ? "bullish" : "bearish"; return a < 20 ? "Slightly " + side : a < 45 ? side[0].toUpperCase() + side.slice(1) : a < 75 ? "Very " + side : a < ALL_IN ? "Max " + side : "All-in " + side; };
 function drawDial(s) {
   const mid = 200, y = 42, x = v => mid + v / 100 * 188, col = s >= 0 ? "#36e3c8" : "#ff6f7d";
   let g = `<defs><linearGradient id="dg" x1="0" x2="1"><stop offset="0" stop-color="#ff6f7d"/><stop offset=".5" stop-color="#26324a"/><stop offset="1" stop-color="#36e3c8"/></linearGradient><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>`;
-  [[-100, -66, "#ffc857"], [-66, -33, "#2ea8ff"], [33, 66, "#2ea8ff"], [66, 100, "#ffc857"]].forEach(([a, b, c]) => g += `<rect x="${x(a)}" y="${y - 22}" width="${x(b) - x(a)}" height="44" fill="${c}" opacity=".06" rx="8"/>`);
+  [[-ALL_IN, -66, "#ffc857", .06], [-66, -33, "#2ea8ff", .06], [33, 66, "#2ea8ff", .06], [66, ALL_IN, "#ffc857", .06], [-100, -ALL_IN, "#ff4d6d", .22], [ALL_IN, 100, "#ff4d6d", .22]]
+    .forEach(([a, b, c, o]) => g += `<rect x="${x(a)}" y="${y - 22}" width="${x(b) - x(a)}" height="44" fill="${c}" opacity="${o}" rx="${Math.abs(a) >= ALL_IN ? 4 : 8}"/>`);
   g += `<rect x="12" y="${y - 4}" width="376" height="8" rx="4" fill="url(#dg)" opacity=".55"/>`;
   for (let v = -100; v <= 100; v += 10) g += `<line x1="${x(v)}" x2="${x(v)}" y1="${y + 12}" y2="${y + (v % 50 === 0 ? 22 : 17)}" stroke="#2c3a52" stroke-width="1.5"/>`;
-  [-66, -33, 33, 66].forEach(v => g += `<line x1="${x(v)}" x2="${x(v)}" y1="${y - 20}" y2="${y + 22}" stroke="#26324a" stroke-dasharray="2 3"/>`);
+  [-ALL_IN, -66, -33, 33, 66, ALL_IN].forEach(v => g += `<line x1="${x(v)}" x2="${x(v)}" y1="${y - 20}" y2="${y + 22}" stroke="#26324a" stroke-dasharray="2 3"/>`);
   g += `<rect x="${Math.min(mid, x(s))}" y="${y - 4}" width="${Math.abs(x(s) - mid)}" height="8" rx="4" fill="${col}"/>`;
   g += `<circle cx="${x(s)}" cy="${y}" r="20" fill="${col}" opacity=".35" filter="url(#glow)"/><circle cx="${x(s)}" cy="${y}" r="15" fill="#f4f1ea"/><circle cx="${x(s)}" cy="${y}" r="6" fill="${col}"/>`;
   $("dialSvg").innerHTML = g;
 }
 
 // ---------- risk follows the dial: 20% of stake at the mild end, 50% at max ----------
-const riskPct = s => s === 0 ? 0 : Math.round((20 + 30 * Math.abs(s) / 100) / 5) * 5;
+const ALL_IN = 95;   // |dial| 95–100: max loss ramps 50% → 100% (same as app/engine/quote.py)
+const riskPct = s => { const a = Math.abs(s); return !a ? 0 : a < ALL_IN ? Math.round((20 + 30 * a / 100) / 5) * 5 : Math.round((50 + 50 * (a - ALL_IN) / (100 - ALL_IN)) / 5) * 5; };
 
 // ---------- chart ----------
 const CW = 400, CH = 260, PL = 46, PR = 8, PT = 12, PB = 44, NPTS = 160;
@@ -876,8 +879,8 @@ function render() {
   document.documentElement.style.setProperty("--side", s < 0 ? "var(--bear)" : "var(--bull)");
   drawDial(s);
   const z = zoneOf(s);
-  document.querySelectorAll(".zones span").forEach(e => e.classList.toggle("on", +e.dataset.z === z));
-  if (z !== lastZone && z !== 0) { const Z = ZONES[Math.abs(z) - 1]; showToast(Z.toast, Math.abs(z) === 3 ? "var(--lev)" : "var(--vol)"); }
+  document.querySelectorAll(".zones span").forEach(e => e.classList.toggle("on", +e.dataset.z === Math.sign(z) * Math.min(3, Math.abs(z))));
+  if (z !== lastZone && z !== 0) { const Z = ZONES[Math.abs(z) - 1]; showToast(Z.toast, Math.abs(z) === 4 ? "var(--bear)" : Math.abs(z) === 3 ? "var(--lev)" : "var(--vol)"); }
   lastZone = z;
   $("mood").firstChild.textContent = moodWord(s);
   $("moodSub").textContent = s === 0 ? "Pick a side to build a position" : ZONES[Math.abs(z) - 1].sub + " · max loss " + Lp + "% of stake";
@@ -1102,9 +1105,9 @@ async function refresh() {
 const DESK = matchMedia("(min-width: 1100px)");
 const isDesk = () => document.body.classList.contains("is-desk");
 const dk = { tf: "15m", list: "setups", candles: [], ticker: [], acct: null };
-const ZNAME = a => a <= 33 ? "Steady" : a <= 66 ? "Bold" : "Moonshot";
-const SETUPS = [[-88, "Bear", "Moonshot", "max payoff on a big drop"], [-55, "Bear", "Bold", "bigger payoff if it falls"], [-25, "Bear", "Steady", "higher odds, capped win"],
-  [25, "Bull", "Steady", "higher odds, capped win"], [55, "Bull", "Bold", "bigger payoff if it rises"], [88, "Bull", "Moonshot", "max payoff on a big move"]];
+const ZNAME = a => a <= 33 ? "Steady" : a <= 66 ? "Bold" : a < ALL_IN ? "Moonshot" : "All in";
+const SETUPS = [[-100, "Bear", "All in", "lose it all or win big"], [-88, "Bear", "Moonshot", "max payoff on a big drop"], [-55, "Bear", "Bold", "bigger payoff if it falls"], [-25, "Bear", "Steady", "higher odds, capped win"],
+  [25, "Bull", "Steady", "higher odds, capped win"], [55, "Bull", "Bold", "bigger payoff if it rises"], [88, "Bull", "Moonshot", "max payoff on a big move"], [100, "Bull", "All in", "lose it all or win big"]];
 
 function arrange() {
   const want = DESK.matches;
@@ -1202,7 +1205,7 @@ function renderDeskLists() {
 
 
 // ---------- avatars, icons and the leaderboard ----------
-const ZICON = { Moonshot: "i-rocket", Bold: "i-flame", Steady: "i-shield" };
+const ZICON = { Moonshot: "i-rocket", Bold: "i-flame", Steady: "i-shield", "All in": "i-bolt" };
 const SIDEGRAD = s => s >= 0 ? ["#5dfbe0", "#16b39c", "#36e3c8"] : ["#ff9aa6", "#e0344b", "#ff5c6c"];
 const ico = (id, cls = "ic") => `<svg class="${cls}"><use href="#${id}"/></svg>`;
 function zoneAvatar(s) {
