@@ -599,7 +599,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
 </svg>
   <header class="dt">
     <div class="dt-brand"><img src="/assets/cathena-logo-160.png" class="dt-logo" alt="">Cathena</div>
-    <nav class="dnav" aria-label="Sections"><button data-view="trade" aria-pressed="true">Trade</button><button data-view="board" aria-pressed="false"><svg class="ic"><use href="#i-trophy"/></svg>Leaderboard</button><button data-view="admin" aria-pressed="false" id="navAdmin" hidden>Admin</button><a href="/docs"><svg class="ic"><use href="#i-sparkle"/></svg>How it works</a></nav>
+    <nav class="dnav" aria-label="Sections"><button data-view="trade" aria-pressed="true">Trade</button><button data-view="admin" aria-pressed="false" id="navAdmin" hidden>Admin</button><a href="/docs"><svg class="ic"><use href="#i-sparkle"/></svg>How it works</a></nav>
     <div class="dt-tag"><b>Options, made easy.</b><span>One slider · max loss shown upfront · cash out any time</span></div>
     <div class="dt-right">
       <button class="dt-connect" id="dConnect" hidden>Connect wallet</button>
@@ -734,6 +734,8 @@ function probProfit(q) { let p = 0, w = 0; for (let z = -4; z <= 4; z += 0.02) {
 
 // ---------- formatting ----------
 const fmtPx = v => Math.round(v).toLocaleString("en-US");
+// payoff as a return on the stake: +303%, −35%
+const retPct = (v, base) => { const p = base ? v / base * 100 : 0; return (p >= 0.5 ? "+" : p <= -0.5 ? "−" : "") + Math.abs(p).toFixed(Math.abs(p) < 9.95 && Math.abs(p) >= 0.5 ? 1 : 0).replace(/\.0$/, "") + "%"; };
 const money = (v, d = 0) => (v < -0.5 * Math.pow(10, -d) ? "−$" : v > 0.5 * Math.pow(10, -d) ? "+$" : "$") + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d });
 const usd = (v, d = 0) => "$" + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d });
 const $ = id => document.getElementById(id);
@@ -874,11 +876,11 @@ const state = { s: 50, C: 100, move: 0.03, pin: 0, tab: "trade" };
 let lastZone = zoneOf(state.s);
 function showToast(text, color) { const t = $("toast"); t.textContent = text; t.style.color = color; t.classList.add("show"); clearTimeout(showToast.h); showToast.h = setTimeout(() => t.classList.remove("show"), 1300); buzz(12); }
 function renderHero(q) {
-  if (!q) { $("heroLbl").textContent = "No position yet"; tweenText("heroVal", 0, v => money(v), () => "big"); $("heroSub").textContent = "Drag the dial left or right."; return; }
+  if (!q) { $("heroLbl").textContent = "No position yet"; tweenText("heroVal", 0, () => "0%", () => "big"); $("heroSub").textContent = "Drag the dial left or right."; return; }
   const x = state.pin, m = x / S - 1, v = q.pnl(x);
   $("heroLbl").textContent = Math.abs(m) < 0.0005 ? "If BTC stays at " + fmtPx(x) + " by 06:00" : "If BTC is " + (m > 0 ? "+" : "−") + Math.abs(m * 100).toFixed(1) + "% at 06:00 · " + fmtPx(x);
-  tweenText("heroVal", v, z => money(z), z => "big " + (z > 0.5 ? "pos" : z < -0.5 ? "neg" : ""));
-  $("heroSub").textContent = (v > 0.5 ? (v / q.maxLoss).toFixed(1) + "× your max loss of " + usd(q.maxLoss) : "Within your max loss of " + usd(q.maxLoss)) + " · " + usd(q.C - q.maxLoss) + " of your stake is never at risk";
+  tweenText("heroVal", v, z => retPct(z, q.C), z => "big " + (z > 0.5 ? "pos" : z < -0.5 ? "neg" : ""));
+  $("heroSub").textContent = money(v) + " on your " + usd(q.C) + " stake · max loss " + retPct(-q.maxLoss, q.C).replace("−", "") + " (" + usd(q.maxLoss) + ")" + (q.C - q.maxLoss >= 0.5 ? " · " + usd(q.C - q.maxLoss) + " never at risk" : "");
 }
 function render() {
   const { s, C } = state, Lp = riskPct(s), q = quote(s, C, Lp);
@@ -1170,7 +1172,7 @@ function renderDesk() {
   if (q) {
     const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X), pp = probProfit(q);
     $("dSum").innerHTML = `<div class="sub" style="font-size:.82rem">If BTC is ${bull ? "up" : "down"} 3% by 06:00</div>
-      <div class="big2 ${v >= 0 ? "pos" : "neg"}">${money(v)}</div>
+      <div class="big2 ${v >= 0 ? "pos" : "neg"}">${retPct(v, state.C)}</div><div class="sub" style="font-size:.84rem;margin-top:-6px">${money(v)} on your ${usd(state.C)} stake</div>
       <div class="row" style="font-size:.84rem"><span class="sub">You can lose at most</span><b class="mono">${usd(q.maxLoss)}</b></div>
       <div class="row" style="font-size:.84rem"><span class="sub">Never at risk</span><b class="mono">${usd(state.C - q.maxLoss)}</b></div>
       <div class="row" style="font-size:.84rem"><span class="sub">Chance of profit</span><b class="mono">${Math.round(pp * 100)}%</b></div><div class="meter2"><span style="width:${pp * 100}%"></span></div>`;
@@ -1191,7 +1193,7 @@ function renderDeskLists() {
     $("dList").innerHTML = SETUPS.map(([s, side, z, sub]) => {
       const q = quote(s, state.C, riskPct(s)), X = S * (1 + (s > 0 ? 0.03 : -0.03)), v = q ? q.pnl(X) : 0, on = Math.sign(s) === Math.sign(state.s) && ZNAME(Math.abs(s)) === ZNAME(Math.abs(state.s));
       return `<div class="srow ${on ? "on" : ""}" data-s="${s}">${zoneAvatar(s)}
-        <div><b>${side} · ${z}</b><small>${sub}</small></div><div class="r"><span class="pos">${money(v)}</span><small>if ${s > 0 ? "+" : "−"}3%</small></div></div>`;
+        <div><b>${side} · ${z}</b><small>${sub}</small></div><div class="r"><span class="${v >= 0 ? "pos" : "neg"}">${retPct(v, state.C)}</span><small>if BTC ${s > 0 ? "+" : "−"}3%</small></div></div>`;
     }).join("");
     $("dList").querySelectorAll("[data-s]").forEach(r => r.addEventListener("click", () => { state.s = +r.dataset.s; $("slider").value = state.s; render(); renderDesk(); buzz(6); }));
   } else {
@@ -1203,7 +1205,7 @@ function renderDeskLists() {
   }
   $("dPosTable").innerHTML = open.length ? `<table><thead><tr><th>Position</th><th>Stake</th><th>Cash out now</th><th>If held to 06:00</th><th>Max loss</th><th></th></tr></thead><tbody>${open.map(p => {
       const m = p.mark || {}, c = m.cashout || {}, v = c.net_pnl || 0;
-      return `<tr><td>${moodWord(p.s)}</td><td>${usd(p.stake)}</td><td class="${v >= 0 ? "pos" : "neg"}">${money(v, 2)}</td><td class="${(m.pnl_fair || 0) >= 0 ? "pos" : "neg"}">${money(m.pnl_fair || 0, 2)}</td><td>${usd(p.max_loss ?? p.max_loss_quoted ?? 0, 2)}</td>
+      return `<tr><td>${moodWord(p.s)}</td><td>${usd(p.stake)}</td><td class="${v >= 0 ? "pos" : "neg"}">${money(v, 2)} <small>${retPct(v, p.stake)}</small></td><td class="${(m.pnl_fair || 0) >= 0 ? "pos" : "neg"}">${money(m.pnl_fair || 0, 2)} <small>${retPct(m.pnl_fair || 0, p.stake)}</small></td><td>${usd(p.max_loss ?? p.max_loss_quoted ?? 0, 2)}</td>
         <td style="text-align:right"><button class="cbtn ${v >= 0 ? "" : "down"}" data-cash="${p.id}">Cash out</button></td></tr>`; }).join("")}</tbody></table>`
     : `<div class="sub" style="padding:10px 4px">No positions yet. Your trades show here with a live cash-out value.</div>`;
   $("dPosTable").querySelectorAll("[data-cash]").forEach(b => b.addEventListener("click", () => openCashout(b.dataset.cash)));
@@ -1317,7 +1319,7 @@ function drawDeskChart() {
     $("dXh").setAttribute("x1", x); $("dXh").setAttribute("x2", x); $("dXh").setAttribute("visibility", "visible");
     $("dYh").setAttribute("y1", y); $("dYh").setAttribute("y2", y); $("dYh").setAttribute("visibility", "visible");
     tip.hidden = false;
-    tip.innerHTML = `<div><span class="sub">BTC</span><b class="mono">$${fmtPx(price)}</b></div>${q ? `<div><span class="sub">If it ends here at 06:00</span><b class="mono ${v >= 0 ? "pos" : "neg"}">${money(v)}</b></div>` : ""}`;
+    tip.innerHTML = `<div><span class="sub">BTC</span><b class="mono">$${fmtPx(price)}</b></div>${q ? `<div><span class="sub">If it ends here at 06:00</span><b class="mono ${v >= 0 ? "pos" : "neg"}">${retPct(v, state.C)} · ${money(v)}</b></div>` : ""}`;
     let lx = x + 16; if (lx + 230 > W) lx = x - 246; tip.style.left = lx + "px"; tip.style.top = Math.max(0, y - 60) + "px";
   };
   $("dHit").onpointerleave = () => { tip.hidden = true; $("dXh").setAttribute("visibility", "hidden"); $("dYh").setAttribute("visibility", "hidden"); };
