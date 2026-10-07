@@ -158,7 +158,7 @@ button { font: inherit; color: inherit; }
 .knob { position: absolute; top: 5px; left: 5px; width: 50px; height: 50px; border-radius: 50%; background: var(--side); color: #04211c; display: grid; place-items: center; font-weight: 800; font-size: 1.25rem; cursor: grab; border: 0; }
 @media (prefers-reduced-motion: no-preference) { .knob { animation: knobPulse 2.2s infinite; } }
 @keyframes knobPulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--side) 45%, transparent); } 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--side) 0%, transparent); } }
-.nav { max-width: 428px; width: 100%; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--s1); border: 1px solid var(--line); border-radius: 18px; padding: 4px; }
+.nav { max-width: 428px; width: 100%; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr) 1.25fr; background: var(--s1); border: 1px solid var(--line); border-radius: 18px; padding: 4px; }
 .nav button { border: 0; background: none; border-radius: 14px; padding: 9px 4px; font-size: .82rem; font-weight: 700; color: var(--ink3); cursor: pointer; position: relative; }
 .nav button[aria-selected="true"] { background: var(--s3); color: var(--ink); }
 .nav .badge { position: absolute; top: 4px; right: 18%; min-width: 16px; height: 16px; border-radius: 8px; background: var(--side); color: #04211c; font-size: .66rem; display: grid; place-items: center; padding: 0 4px; }
@@ -410,6 +410,11 @@ body.is-desk .sheet .panel { border-radius: 24px; }
 .demo-wrap { padding: 12px 22px 0; }
 .demo-wrap .demo-bar { max-width: none; }
 @media (max-width: 420px) { .demo-bar { font-size: .8rem; } .demo-btn { padding: 7px 10px; } }
+.nav .nav-link { display: grid; place-items: center; border-radius: 14px; padding: 9px 4px; font-size: .82rem; font-weight: 700; color: var(--ink3); text-decoration: none; white-space: nowrap; }
+.nav .nav-link:hover { color: var(--ink); }
+.dnav a { display: flex; align-items: center; gap: 7px; padding: 8px 16px; border-radius: 10px; font-weight: 600; font-size: .92rem; color: var(--ink3); text-decoration: none; }
+.dnav a:hover { color: var(--ink); }
+.dnav a .ic { color: var(--vol); }
 .su-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dt-connect { border: 0; border-radius: 12px; padding: 11px 18px; font: 800 .95rem var(--f-body); cursor: pointer; color: #04211c; background: linear-gradient(180deg, color-mix(in srgb, var(--bull) 78%, #fff), var(--bull) 55%); box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 10px 26px -12px var(--bull); }
 #desk .dl { overflow-x: hidden; }
@@ -545,6 +550,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
     <button role="tab" id="nav-trade" aria-selected="true">Trade</button>
     <button role="tab" id="nav-positions" aria-selected="false">Positions<span class="badge" id="posBadge" hidden></span></button>
     <button role="tab" id="nav-account" aria-selected="false">Account</button>
+    <a class="nav-link" href="/docs">How it works</a>
   </div>
 </div>
 
@@ -593,7 +599,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
 </svg>
   <header class="dt">
     <div class="dt-brand"><img src="/assets/cathena-logo-160.png" class="dt-logo" alt="">Cathena</div>
-    <nav class="dnav" aria-label="Sections"><button data-view="trade" aria-pressed="true">Trade</button><button data-view="board" aria-pressed="false"><svg class="ic"><use href="#i-trophy"/></svg>Leaderboard</button><button data-view="admin" aria-pressed="false" id="navAdmin" hidden>Admin</button></nav>
+    <nav class="dnav" aria-label="Sections"><button data-view="trade" aria-pressed="true">Trade</button><button data-view="board" aria-pressed="false"><svg class="ic"><use href="#i-trophy"/></svg>Leaderboard</button><button data-view="admin" aria-pressed="false" id="navAdmin" hidden>Admin</button><a href="/docs"><svg class="ic"><use href="#i-sparkle"/></svg>How it works</a></nav>
     <div class="dt-tag"><b>Options, made easy.</b><span>One slider · max loss shown upfront · cash out any time</span></div>
     <div class="dt-right">
       <button class="dt-connect" id="dConnect" hidden>Connect wallet</button>
@@ -1367,6 +1373,18 @@ function walletIcon(w) {
   const [bg, ch] = MONO[w && w.info ? w.info.name : w] || ["#5b7cff", "W"];
   return `<span class="cw-ico" style="background:${bg}">${ch}</span>`;
 }
+let watched = null;
+function watchAccounts(p) {
+  if (!p || !p.on || watched === p) return;
+  watched = p;
+  p.on("accountsChanged", accs => {
+    const a = (accs && accs[0] || "").toLowerCase();
+    if (SETUP && SETUP.signed_in && a && a !== SETUP.address) {
+      showToast(`Wallet switched to ${short(a)}. Sign in again to use it.`, "var(--lev)");
+      api("/v1/auth/logout", { body: {} }).then(() => { suMsg = {}; $("setupSheet").hidden = true; return loadSetup(); }).then(() => { fetchPositions(); refresh(); openConnect(); });
+    }
+  });
+}
 function openConnect() { cw = { view: "pick" }; $("cwModal").hidden = false; dispatchEvent(new Event("eip6963:requestProvider")); renderConnect(); }
 function closeConnect() { $("cwModal").hidden = true; }
 $("cwClose").addEventListener("click", closeConnect);
@@ -1410,16 +1428,27 @@ function renderConnect() {
     <div class="cw-list">${list.length ? list.map(row).join("") : `<p style="text-align:center;margin:-2px 0 6px">${IS_PHONE ? "Open Cathena in your wallet app:" : "No wallet found in this browser."}</p>` + fallback}</div>
     <div class="cw-sep">or</div>
     <button class="cw-row" disabled><span class="cw-ico">${ICON_MAIL}</span><span>Continue with email</span><span class="cw-badge soon">Soon</span><span class="cw-chev"></span></button>
-    <p class="cw-legal">By connecting, you agree to the <a id="cwTerms">early-access terms</a>. Cathena never holds your keys.</p>`;
+    <p class="cw-legal">By connecting, you agree to the <a id="cwTerms">early-access terms</a>. Cathena never holds your keys. <a href="/docs" target="_blank" rel="noopener">How it works</a></p>`;
   body.querySelectorAll("[data-w]").forEach(b => b.onclick = () => connectWith(list[+b.dataset.w]));
   $("cwTerms").onclick = () => { cw.view = "terms"; renderConnect(); };
 }
+// eth_requestAccounts silently reuses the account a wallet already connected; asking for the permission again makes
+// MetaMask and Rabby open their account picker. Wallets without that method fall back to the plain request.
+async function pickAccount(p) {
+  try {
+    await p.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+    const [a] = await p.request({ method: "eth_accounts" });
+    if (a) return a;
+  } catch (e) { if (e.code === 4001) throw e; }
+  const [a] = await p.request({ method: "eth_requestAccounts" });
+  return a;
+}
 async function connectWith(w) {
-  CHOSEN = w.provider; cw = { view: "connecting", wallet: w }; renderConnect();
+  CHOSEN = w.provider; watchAccounts(CHOSEN); cw = { view: "connecting", wallet: w }; renderConnect();
   try { if (w.info.rdns && w.info.rdns !== "injected") localStorage.setItem("cathena_wallet", w.info.rdns); } catch (e) {}
   let a, at = 1;
   try {
-    [a] = await CHOSEN.request({ method: "eth_requestAccounts" });
+    a = await pickAccount(CHOSEN);
     at = 2; cw.view = "signing"; renderConnect();
     const { message } = await api("/v1/auth/challenge", { body: { address: a, invite: INVITE, accept_terms: true } });
     const signature = await CHOSEN.request({ method: "personal_sign", params: [hexUtf8(message), a] });
@@ -1464,6 +1493,7 @@ async function withdrawUSDC(amount) {
 }
 async function loadSetup() {
   try { SETUP = await api("/v1/setup"); } catch (e) { SETUP = null; }
+  if (SETUP && SETUP.signed_in) watchAccounts(ETH());
   renderSetupEntry();
   if (!$("setupSheet").hidden) renderSetup();
   return SETUP;
