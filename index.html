@@ -712,7 +712,8 @@ function quote(s, C, Lp) {
   if (CUSHION * units * f > 0.6 * M) units = 0.6 * M / (CUSHION * f);     // keep at least 40% of the budget for the binary
   units = Math.floor(units * 1e5) / 1e5;
   const warns = { syn: "", bin: "" };
-  if (units * Math.abs(dlt) * S < 10) { if (wSyn > 0.05) warns.syn = Lp >= 100 ? "All in: the whole stake goes on today's line." : "Below the $10 perp minimum. Add amount to switch it on."; units = 0; }
+  const MINO = minOrder();
+  if (units * Math.abs(dlt) * S < MINO || units <= 0) { if (wSyn > 0.05) warns.syn = Lp >= 100 ? "All in: the whole stake goes on today's line." : "Below the $10 perp minimum. Add amount to switch it on."; units = 0; }
   const capped = units > 0 && wSyn > 0.98;
   if (capped) warns.syn = "Using all the margin this amount allows. Add amount to unlock more convexity.";
   const synBudget = CUSHION * units * f;
@@ -720,9 +721,9 @@ function quote(s, C, Lp) {
   const book = bull ? SNAP.yes : SNAP.no;
   let bin = walk(book.asks, binBudget);
   // Hyperliquid checks an outcome order's $10 minimum at the mid price, not the price paid
-  const mid = (book.bid + book.asks[0][0]) / 2, minN = Math.ceil(10 * 1.005 / mid);
+  const mid = (book.bid + book.asks[0][0]) / 2, minN = Math.ceil(MINO * 1.005 / mid);
   const minStake = Math.ceil(minN * book.asks[0][0] * 1.01 / (Lp / 100));
-  if (bin.cost < 10 || bin.n < minN) { warns.bin = bin.n ? "Binary leg is under Hyperliquid's $10 minimum at this stake; raise the stake to trade this setting." : ""; bin = { n: 0, cost: 0, avg: book.asks[0][0] }; }
+  if (bin.cost < MINO || bin.n < minN || !bin.n) { warns.bin = bin.n ? "Binary leg is under Hyperliquid's $10 minimum at this stake; raise the stake to trade this setting." : ""; bin = { n: 0, cost: 0, avg: book.asks[0][0] }; }
   const cash = C - bin.cost;
   const levNow = units ? units * Math.abs(dlt) * S / C : 0, levFull = units ? units * S / C : 0;   // on the whole amount
   const maxLoss = bin.cost + synBudget;
@@ -738,6 +739,7 @@ function quote(s, C, Lp) {
 // ---------- formatting ----------
 const fmtPx = v => Math.round(v).toLocaleString("en-US");
 // payoff as a return on the stake: +303%, −35%
+const dp = v => Math.abs(v) < 100 ? 2 : 0;   // cents for small amounts
 const retPct = (v, base) => { const p = base ? v / base * 100 : 0; return (p >= 0.5 ? "+" : p <= -0.5 ? "−" : "") + Math.abs(p).toFixed(Math.abs(p) < 9.95 && Math.abs(p) >= 0.5 ? 1 : 0).replace(/\.0$/, "") + "%"; };
 const money = (v, d = 0) => (v < -0.5 * Math.pow(10, -d) ? "−$" : v > 0.5 * Math.pow(10, -d) ? "+$" : "$") + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d });
 const usd = (v, d = 0) => "$" + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -883,13 +885,14 @@ function renderHero(q) {
   const x = state.pin, m = x / S - 1, v = q.pnl(x);
   $("heroLbl").textContent = Math.abs(m) < 0.0005 ? "If BTC stays at " + fmtPx(x) + " by 06:00" : "If BTC is " + (m > 0 ? "+" : "−") + Math.abs(m * 100).toFixed(1) + "% at 06:00 · " + fmtPx(x);
   tweenText("heroVal", v, z => retPct(z, q.C), z => "big " + (z > 0.5 ? "pos" : z < -0.5 ? "neg" : ""));
-  $("heroSub").textContent = money(v) + " on your " + usd(q.C) + " stake · max loss " + retPct(-q.maxLoss, q.C).replace("−", "") + " (" + usd(q.maxLoss) + ")" + (q.C - q.maxLoss >= 0.5 ? " · " + usd(q.C - q.maxLoss) + " never at risk" : "");
+  $("heroSub").textContent = money(v, dp(v)) + " on your " + usd(q.C, dp(q.C)) + " stake · max loss " + retPct(-q.maxLoss, q.C).replace("−", "") + " (" + usd(q.maxLoss, dp(q.maxLoss)) + ")" + (q.C - q.maxLoss >= 0.005 ? " · " + usd(q.C - q.maxLoss, dp(q.C)) + " never at risk" : "");
 }
 function render() {
   const lim = stakeLimit(), broke = lim && lim.max < 10;
   if (lim && state.C < 10 && lim.max >= 10) state.C = Math.min(lim.max, 20);    // just funded: start from a stake that can trade
   renderStakeChips();                                                          // clamps the stake to what you have
-  const { s, C } = state, Lp = riskPct(s), tq = tradableQuote(s, broke ? 0 : C), q = tq.q, preview = tq.preview;
+  if (lim && !broke) { const need = minTradable(state.s); if (need && state.C < need && lim.max >= need) { state.C = need; renderStakeChips(); } }
+  const { s, C } = state, Lp = riskPct(s), tq = tradableQuote(s, C), q = tq.q;
   document.documentElement.style.setProperty("--side", s < 0 ? "var(--bear)" : "var(--bull)");
   drawDial(s);
   const z = zoneOf(s);
@@ -904,12 +907,7 @@ function render() {
   // scenario pin follows the side
   if (state.move !== null) state.pin = S * (1 + (s < 0 ? -1 : 1) * state.move);
   drawMarks(); renderHero(q);
-  if (preview && q) {
-    $("heroLbl").textContent += ` · on a $${q.C} stake`;
-    $("heroSub").textContent = broke || (lim && lim.free < q.C)
-      ? `$${q.C} is the smallest stake this setting can trade. You have ${usd(lim.free, 2)}: deposit ${usd(Math.ceil(q.C - lim.free))} more, or slide further out (All in needs the least).`
-      : `$${q.C} is the smallest stake this setting can trade. Raise your stake to trade it.`;
-  }
+  if (tq.short && lim) $("heroSub").textContent += ` · deposit ${usd(Math.ceil(tq.need - lim.free))} more to place it`;
   if (!q) { animateTo(seriesFor(null), null); $("holdLegend").innerHTML = ""; ["mixBin", "mixSyn", "mixCash"].forEach(i => $(i).style.width = "0%"); $("warnLine").hidden = true; tweenText("stLoss", 0, () => "—"); tweenText("stSafe", 0, () => "—"); tweenText("stLev", 0, () => "—"); return; }
   tweenText("stLoss", -q.maxLoss, x => money(x));
   tweenText("stSafe", q.C - q.maxLoss, x => usd(x));
@@ -1071,6 +1069,14 @@ function setTab(t) {
 // ---------- controls ----------
 $("slider").addEventListener("input", () => { let v = +$("slider").value; if (Math.abs(v) < 4) v = 0; state.s = v; render(); });
 // when your stake (or balance) is under what a setting needs, preview it at the smallest stake that trades
+// Hyperliquid's $10 order minimum for signed-in accounts; the demo is paper money and takes any stake
+const minOrder = () => (typeof SETUP !== "undefined" && SETUP && SETUP.signed_in) ? 10 : 0;
+// a quote scaled to another stake: payoffs are proportional, so a $34 quote x (5 / 34) shows what $5 would do
+function scaleQuote(q, k) {
+  const m = f => X => f(X) * k;
+  return { ...q, C: q.C * k, M: q.M * k, units: q.units * k, unitsCap: q.unitsCap * k, synBudget: q.synBudget * k, cash: q.cash * k, maxLoss: q.maxLoss * k,
+           delta: q.delta * k, bin: { ...q.bin, n: q.bin.n * k, cost: q.bin.cost * k }, pnl: m(q.pnl), binP: m(q.binP), synP: m(q.synP), warns: { syn: "", bin: "" } };
+}
 // smallest whole-dollar stake where the binary clears the $10 minimum (same search as min_tradable_stake on the server)
 const MIN_CACHE = new Map();
 function minTradable(s) {
@@ -1082,16 +1088,19 @@ function minTradable(s) {
   MIN_CACHE.set(key, best);
   return best;
 }
+// the quote to show for a stake: the real one, or (when it's under the $10 minimum) the smallest real trade scaled to it
 function tradableQuote(s, C) {
   const Lp = riskPct(s);
-  if (!Lp) return { q: null, preview: false };
+  if (!Lp) return { q: null, short: false };
   const q = C >= 1 ? quote(s, C, Lp) : null;
-  if (q && q.bin.n) return { q, preview: false };
-  const st = minTradable(s);
-  return st ? { q: quote(s, st, Lp), preview: true } : { q, preview: false };
+  if (q && q.bin.n) return { q, short: false };
+  const need = minTradable(s);
+  if (!need) return { q, short: false };
+  const base = quote(s, need, Lp);
+  return { q: C >= 1 ? scaleQuote(base, C / need) : base, short: true, need };
 }
 // stake chips follow what you can actually stake: your free USDC on Hyperliquid, capped at your per-trade limit
-const DEMO_CHIPS = [100, 250, 500, 1000, 2500];
+const DEMO_CHIPS = [20, 100, 500, 1000, 2500];
 const chipLabel = c => c >= 1000 ? (c / 1000) + "k" : String(c);
 function stakeLimit() {
   if (typeof SETUP === "undefined" || !SETUP || !SETUP.signed_in || !SETUP.balances) return null;   // demo: paper money
@@ -1125,10 +1134,15 @@ knob.addEventListener("pointerup", e => { if (!drag) return; const k = setSlide(
 knob.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); place(); } });
 async function place() {
   const lim0 = stakeLimit();
-  if (lim0 && lim0.max < 10) { setSlide(0); showToast(`You have ${usd(lim0.free, 2)}. Deposit to trade.`, "var(--lev)"); openSetup(); return; }
+  if (lim0 && lim0.max < 10) { setSlide(0); const need = minTradable(state.s) || 10; showToast(`Deposit ${usd(Math.ceil(need - lim0.free))} more to place this trade`, "var(--lev)"); openSetup(); return; }
   const q = quote(state.s, state.C, riskPct(state.s)); setSlide(0);
   if (!q) { showToast("Pick a side first", "var(--ink2)"); return; }
-  if (!q.bin.n) { showToast(`Too small to trade: stake at least $${minTradable(state.s)} for this setting`, "var(--lev)"); return; }
+  if (!q.bin.n) {
+    const need = minTradable(state.s), l = stakeLimit();
+    if (l && need && l.free < need) { showToast(`Deposit ${usd(Math.ceil(need - l.free))} more to place this trade`, "var(--lev)"); openSetup(); }
+    else showToast(`This trade needs a stake of ${usd(need || 10)}`, "var(--lev)");
+    return;
+  }
   if (state.C > MAX_STAKE) { showToast(`Stake is above your ${usd(MAX_STAKE)} cap`, "var(--bear)"); return; }
   const lim = stakeLimit();
   if (lim && state.C > lim.free + 0.01) { showToast(`You have ${usd(lim.free, 2)} available. Deposit more or lower the stake.`, "var(--bear)"); openSetup(); return; }
@@ -1229,18 +1243,18 @@ function renderDeskStats() {
 
 function renderDesk() {
   if (!isDesk() || !SNAP) return;
-  const lim = stakeLimit(), broke = lim && lim.max < 10;
-  const a = Math.abs(state.s), bull = state.s >= 0, { q, preview } = tradableQuote(state.s, broke ? 0 : state.C);
+  const lim = stakeLimit();
+  const a = Math.abs(state.s), bull = state.s >= 0, { q, short, need } = tradableQuote(state.s, state.C);
   if (q) {
-    const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X), short = lim && lim.free < q.C;
+    const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X);
     $("dSum").innerHTML = `<div class="sub" style="font-size:.82rem">If BTC is ${bull ? "up" : "down"} 3% by 06:00</div>
-      <div class="big2 ${v >= 0 ? "pos" : "neg"}">${retPct(v, q.C)}</div><div class="sub" style="font-size:.84rem;margin-top:-6px">${money(v)} on ${preview ? "a" : "your"} ${usd(q.C)} stake</div>
-      <div class="row" style="font-size:.84rem"><span class="sub">You can lose at most</span><b class="mono">${usd(q.maxLoss)}</b></div>
-      <div class="row" style="font-size:.84rem"><span class="sub">Never at risk</span><b class="mono">${usd(q.C - q.maxLoss)}</b></div>
-      ${preview ? `<div class="su-warn" style="font-size:.82rem">$${q.C} is the smallest stake this setting can trade.${short ? ` You have ${usd(lim.free, 2)}: deposit ${usd(Math.ceil(q.C - lim.free))} more, or slide further out (All in needs the least).` : " Raise your stake to trade it."}</div>` : ""}`;
-    $("dStake").textContent = preview ? (short ? "Deposit to trade" : `Stake at least $${q.C} for ${ZNAME(a)}`) : `Stake ${usd(state.C)} · ${bull ? "Bull" : "Bear"} ${ZNAME(a)}`;
+      <div class="big2 ${v >= 0 ? "pos" : "neg"}">${retPct(v, q.C)}</div><div class="sub" style="font-size:.84rem;margin-top:-6px">${money(v, dp(v))} on your ${usd(q.C, dp(q.C))} stake</div>
+      <div class="row" style="font-size:.84rem"><span class="sub">You can lose at most</span><b class="mono">${usd(q.maxLoss, dp(q.maxLoss))}</b></div>
+      <div class="row" style="font-size:.84rem"><span class="sub">Never at risk</span><b class="mono">${usd(q.C - q.maxLoss, dp(q.C))}</b></div>
+      ${short && lim ? `<div class="sub" style="font-size:.8rem">Deposit ${usd(Math.ceil(need - lim.free))} more to place this trade.</div>` : ""}`;
+    $("dStake").textContent = short ? "Deposit to trade" : `Stake ${usd(state.C)} · ${bull ? "Bull" : "Bear"} ${ZNAME(a)}`;
     $("dStake").classList.toggle("bear", !bull);
-    $("dStake").disabled = preview && !short;
+    $("dStake").disabled = false;
   } else { $("dSum").innerHTML = `<div class="sub">Slide left for bearish, right for bullish.</div>`; $("dStake").textContent = "Move the slider"; $("dStake").disabled = true; }
   $("dNote").textContent = MODE === "live" ? "Live on Hyperliquid · trading key can't withdraw" : CLEAN ? "Settles 06:00 UTC · cash out any time" : "Dry run · nothing is sent";
   renderDeskStats(); renderDeskLists(); drawDeskChart();
@@ -1253,9 +1267,9 @@ function renderDeskLists() {
   $("dPosN").textContent = open.length ? `(${open.length} live)` : "";
   if (dk.list === "setups") {
     $("dList").innerHTML = SETUPS.map(([s, side, z, sub]) => {
-      const { q, preview } = tradableQuote(s, state.C), X = S * (1 + (s > 0 ? 0.03 : -0.03)), v = q ? q.pnl(X) : 0, on = Math.sign(s) === Math.sign(state.s) && ZNAME(Math.abs(s)) === ZNAME(Math.abs(state.s));
+      const { q } = tradableQuote(s, state.C), X = S * (1 + (s > 0 ? 0.03 : -0.03)), v = q ? q.pnl(X) : 0, on = Math.sign(s) === Math.sign(state.s) && ZNAME(Math.abs(s)) === ZNAME(Math.abs(state.s));
       return `<div class="srow ${on ? "on" : ""}" data-s="${s}">${zoneAvatar(s)}
-        <div><b>${side} · ${z}</b><small>${sub}</small></div><div class="r"><span class="${v >= 0 ? "pos" : "neg"}">${retPct(v, q ? q.C : 0)}</span><small>if BTC ${s > 0 ? "+" : "−"}3%${preview && q ? ` · from $${q.C}` : ""}</small></div></div>`;
+        <div><b>${side} · ${z}</b><small>${sub}</small></div><div class="r"><span class="${v >= 0 ? "pos" : "neg"}">${retPct(v, q ? q.C : 0)}</span><small>if BTC ${s > 0 ? "+" : "−"}3%</small></div></div>`;
     }).join("");
     $("dList").querySelectorAll("[data-s]").forEach(r => r.addEventListener("click", () => { state.s = +r.dataset.s; $("slider").value = state.s; render(); renderDesk(); buzz(6); }));
   } else {
