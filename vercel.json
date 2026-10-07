@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/v1/:path*", "destination": "https://api-cathena.rndm.io/v1/:path*" },
+    { "source": "/media/:path*", "destination": "https://api-cathena.rndm.io/media/:path*" },
+    { "source": "/watch", "destination": "https://api-cathena.rndm.io/watch" }
+  ],
+  "headers": [
+    { "source": "/(.*)", "headers": [
+      { "key": "X-Content-Type-Options", "value": "nosniff" },
+      { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+      { "key": "Strict-Transport-Security", "value": "max-age=31536000" }
+    ] },
+    { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+  ]
+}

@@ -2,7 +2,7 @@
 
 Options, made easy. One slider, max loss shown upfront, cash out any time, on Hyperliquid.
 
-Static site for Vercel. The API, videos and `/watch` page are served by the Cathena backend
+Static site for Vercel. The API, videos and `/watch` page are served by the Cathena backend at `https://api-cathena.rndm.io`
 and proxied through Vercel (see `vercel.json`, added once the API domain is set), so everything runs on one domain.
 
 - `index.html` – the app (mobile + desktop)
