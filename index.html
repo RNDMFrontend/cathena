@@ -108,7 +108,9 @@ button { font: inherit; color: inherit; }
 @keyframes breathe { 0%,100% { opacity: .12; } 50% { opacity: .38; } }
 @keyframes cardGlow { 0%,100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--side) 14%, transparent), 0 18px 60px -34px color-mix(in srgb, var(--side) 40%, transparent); } 50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--side) 30%, transparent), 0 18px 70px -26px color-mix(in srgb, var(--side) 70%, transparent); } }
 .marks { position: absolute; left: 0; right: 0; bottom: 4px; height: 24px; }
-.mk { position: absolute; transform: translateX(-50%); border: 1px solid var(--line); background: var(--s2); color: var(--ink2); border-radius: 999px; padding: 2px 8px; font: 500 .7rem var(--f-mono); cursor: pointer; white-space: nowrap; }
+.mk small { display: block; font-size: .62rem; color: var(--ink3); line-height: 1.1; }
+.mk[aria-pressed="true"] small { color: inherit; opacity: .8; }
+.mk { position: absolute; transform: translateX(-50%); text-align: center; border: 1px solid var(--line); background: var(--s2); color: var(--ink2); border-radius: 10px; padding: 3px 8px; font: 500 .7rem/1.15 var(--f-mono); cursor: pointer; white-space: nowrap; }
 .mk[aria-pressed="true"] { background: var(--side); color: #04211c; border-color: var(--side); }
 .tip { position: absolute; pointer-events: none; background: var(--s3); border: 1px solid var(--line); border-radius: 12px; padding: 7px 10px; font-size: .76rem; display: grid; gap: 2px; min-width: 140px; }
 .tip div { display: flex; justify-content: space-between; gap: 10px; }
@@ -922,10 +924,13 @@ function animateTo(sr, q) {
 }
 // scenario markers sit on the chart's price axis
 const MOVES = [-0.02, 0, 0.01, 0.03, 0.06];
+const fmtK = v => "$" + (v / 1000).toFixed(1) + "k";   // 85,712 → $85.7k, for tight labels
+// a move always says where BTC ends up and what it's measured from: "$85,712 (+3.0% from $83,211 now)"
+const moveText = X => { const m = X / S - 1; return Math.abs(m) < 0.0005 ? `$${fmtPx(X)} (where it is now)` : `$${fmtPx(X)} (${m > 0 ? "+" : "−"}${Math.abs(m * 100).toFixed(1)}% from $${fmtPx(S)} now)`; };
 function drawMarks() {
   const dir = state.s < 0 ? -1 : 1;
   let lastLeft = -100;   // markers closer than 11% of the width would collide: keep the first, drop the next
-  $("marks").innerHTML = MOVES.map(m => { const px = S * (1 + dir * m), left = cx(px) / CW * 100; if (Math.abs(left - lastLeft) < 11 || left < 13 || left > 95) return ""; lastLeft = left; return `<button class="mk" data-m="${m}" style="left:${left}%" aria-pressed="${Math.abs(state.pin - px) < 1}">${m === 0 ? "Now" : (dir * m > 0 ? "+" : "−") + Math.abs(m * 100) + "%"}</button>`; }).join("");
+  $("marks").innerHTML = MOVES.map(m => { const px = S * (1 + dir * m), left = cx(px) / CW * 100; if (Math.abs(left - lastLeft) < 11 || left < 13 || left > 95) return ""; lastLeft = left; return `<button class="mk" data-m="${m}" style="left:${left}%" aria-pressed="${Math.abs(state.pin - px) < 1}">${m === 0 ? "Now" : (dir * m > 0 ? "+" : "−") + Math.abs(m * 100) + "%"}<small>${fmtK(px)}</small></button>`; }).join("");
   $("marks").querySelectorAll(".mk").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); state.move = +b.dataset.m; state.pin = S * (1 + (state.s < 0 ? -1 : 1) * state.move); buzz(6); render(); }));
 }
 const box = $("chartBox"); let scrubbing = false;
@@ -962,7 +967,7 @@ function showToast(text, color) { const t = $("toast"); t.textContent = text; t.
 function renderHero(q) {
   if (!q) { $("heroLbl").textContent = "No position yet"; tweenText("heroVal", 0, () => "0%", () => "big"); $("heroSub").textContent = "Drag the dial left or right."; return; }
   const x = state.pin, m = x / S - 1, v = q.pnl(x);
-  $("heroLbl").textContent = Math.abs(m) < 0.0005 ? "If BTC stays at " + fmtPx(x) + " by 06:00" : "If BTC is " + (m > 0 ? "+" : "−") + Math.abs(m * 100).toFixed(1) + "% at 06:00 · " + fmtPx(x);
+  $("heroLbl").textContent = Math.abs(m) < 0.0005 ? "If BTC stays at $" + fmtPx(x) + " by 06:00" : "If BTC is at " + moveText(x) + " at 06:00";
   tweenText("heroVal", v, z => retPct(z, q.C), z => "big " + (z > 0.5 ? "pos" : z < -0.5 ? "neg" : ""));
   $("heroSub").textContent = money(v, dp(v)) + " on your " + usd(q.C, dp(q.C)) + " stake · max loss " + retPct(-q.maxLoss, q.C).replace("−", "") + " (" + usd(q.maxLoss, dp(q.maxLoss)) + ")" + (q.C - q.maxLoss >= 0.005 ? " · " + usd(q.C - q.maxLoss, dp(q.C)) + " never at risk" : "");
 }
@@ -1424,7 +1429,7 @@ function renderDesk() {
     $("dStake").textContent = "Moonshot is off right now"; $("dStake").disabled = true;
   } else if (q) {
     const m = 0.03 * (bull ? 1 : -1), X = S * (1 + m), v = q.pnl(X);
-    $("dSum").innerHTML = `<div class="sub" style="font-size:.82rem">If BTC is ${bull ? "up" : "down"} 3% by 06:00</div>
+    $("dSum").innerHTML = `<div class="sub" style="font-size:.82rem">If BTC is at ${moveText(X)} at 06:00</div>
       <div class="big2 ${v >= 0 ? "pos" : "neg"}">${retPct(v, q.C)}</div><div class="sub" style="font-size:.84rem;margin-top:-6px">${money(v, dp(v))} on your ${usd(q.C, dp(q.C))} stake</div>
       <div class="row" style="font-size:.84rem"><span class="sub">You can lose at most</span><b class="mono">${usd(q.maxLoss, dp(q.maxLoss))}</b></div>
       <div class="row" style="font-size:.84rem"><span class="sub">Never at risk</span><b class="mono">${usd(q.C - q.maxLoss, dp(q.C))}</b></div>
@@ -1446,7 +1451,7 @@ function renderDeskLists() {
     $("dList").innerHTML = SETUPS.filter(([s]) => dialClamp(s) === s).map(([s, side, z, sub]) => {
       const { q } = tradableQuote(s, state.C), X = S * (1 + (s > 0 ? 0.03 : -0.03)), v = q ? q.pnl(X) : 0, on = Math.sign(s) === Math.sign(state.s) && ZNAME(Math.abs(s)) === ZNAME(Math.abs(state.s));
       return `<div class="srow ${on ? "on" : ""}" data-s="${s}">${zoneAvatar(s)}
-        <div><b>${side} · ${z}</b><small>${sub}</small></div><div class="r"><span class="${v >= 0 ? "pos" : "neg"}">${retPct(v, q ? q.C : 0)}</span><small>if BTC ${s > 0 ? "+" : "−"}3%</small></div></div>`;
+        <div><b>${side} · ${z}</b><small>${sub}</small></div><div class="r"><span class="${v >= 0 ? "pos" : "neg"}">${retPct(v, q ? q.C : 0)}</span><small>if BTC ${fmtK(X)} (${s > 0 ? "+" : "−"}3%)</small></div></div>`;
     }).join("");
     $("dList").querySelectorAll("[data-s]").forEach(r => r.addEventListener("click", () => { state.s = +r.dataset.s; $("slider").value = state.s; render(); renderDesk(); buzz(6); }));
   } else {
