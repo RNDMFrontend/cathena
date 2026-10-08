@@ -148,7 +148,8 @@ button { font: inherit; color: inherit; }
 .bk-row .r1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-weight: 700; }
 .bk-row .r2 { font-family: var(--f-mono); font-size: .74rem; color: var(--ink2); display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .bk-row .st { font-size: .7rem; font-weight: 600; color: var(--ink3); margin-left: 6px; }
-.logo, .dt-logo { cursor: pointer; }
+.logo, .dt-logo, .clicky { cursor: pointer; }
+.clicky:hover #dPnl, .clicky:hover #eqSub { text-decoration: underline; text-underline-offset: 3px; }
 .kv { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .kv div { background: var(--s2); border-radius: 12px; padding: 9px 10px; display: grid; gap: 1px; min-width: 0; }
 .kv span { font-size: .7rem; color: var(--ink3); }
@@ -555,8 +556,8 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
     <div class="card su-entry"><div><b id="mSetupT">Trade with your own wallet</b><div class="sub" id="mSetupS">Connect, deposit USDC, and you're set.</div></div><button class="btn" id="mSetupBtn">Connect wallet</button></div>
     <div class="card">
       <div class="lbl">Equity on Hyperliquid</div>
-      <div class="equity mono" id="eqVal">—</div>
-      <div class="sub" id="eqSub"></div>
+      <div class="clicky" id="eqBox" role="button" tabindex="0" title="See every position"><div class="equity mono" id="eqVal">—</div>
+      <div class="sub" id="eqSub"></div></div>
       <div class="kv" id="eqKv"></div>
     </div>
     <div class="card" style="gap:10px;padding:14px 18px">
@@ -651,7 +652,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
     <div class="dt-right">
       <button class="dt-connect" id="dConnect" hidden>Connect wallet</button>
       <div class="dt-bal"><b class="mono" id="dCash">$0.00</b><span>cash · <a id="dDeposit">Top up</a> · <a id="dHist">History</a></span></div>
-      <div class="dt-bal"><b class="mono" id="dEq">$0.00</b><span class="mono" id="dPnl">today</span></div>
+      <div class="dt-bal clicky" id="dEqBox" role="button" tabindex="0" title="See every position"><b class="mono" id="dEq">$0.00</b><span class="mono" id="dPnl">today</span></div>
       <img src="/assets/cathena-logo-160.png" class="dt-avatar" alt="Account">
     </div>
   </header>
@@ -1100,6 +1101,7 @@ function renderBook() {
 document.querySelectorAll(".logo, .dt-logo").forEach(el => { el.title = "Your positions"; el.setAttribute("role", "button"); el.setAttribute("tabindex", "0");
   el.addEventListener("click", openBook); el.addEventListener("keydown", e => { if (e.key === "Enter") openBook(); }); });
 $("posHist").addEventListener("click", openBook);
+["dEqBox", "eqBox"].forEach(id => { $(id).addEventListener("click", openBook); $(id).addEventListener("keydown", e => { if (e.key === "Enter") openBook(); }); });
 $("dHist").addEventListener("click", openBook);
 $("bkClose").addEventListener("click", () => { $("bookSheet").hidden = true; });
 $("bookSheet").addEventListener("click", e => { if (e.target.id === "bookSheet") $("bookSheet").hidden = true; });
