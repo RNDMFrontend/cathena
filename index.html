@@ -545,7 +545,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
 
   <!-- POSITIONS -->
   <section id="tab-positions" hidden style="display:grid;gap:14px">
-    <div class="row"><div class="brand" style="font-size:1.2rem">Positions</div><span class="example" id="posMode">Dry run</span></div>
+    <div class="row"><div class="brand" style="font-size:1.2rem">Positions</div><div style="display:flex;gap:8px;align-items:center"><button class="ghost hist-btn" id="posHist" style="padding:6px 12px">History</button><span class="example" id="posMode">Dry run</span></div></div>
     <div id="posList" style="display:grid;gap:14px"></div>
   </section>
 
@@ -650,7 +650,7 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
     <div class="dt-tag"><b>Options, made easy.</b><span>One slider · max loss shown upfront · cash out any time</span></div>
     <div class="dt-right">
       <button class="dt-connect" id="dConnect" hidden>Connect wallet</button>
-      <div class="dt-bal"><b class="mono" id="dCash">$0.00</b><span>cash · <a id="dDeposit">Top up</a></span></div>
+      <div class="dt-bal"><b class="mono" id="dCash">$0.00</b><span>cash · <a id="dDeposit">Top up</a> · <a id="dHist">History</a></span></div>
       <div class="dt-bal"><b class="mono" id="dEq">$0.00</b><span class="mono" id="dPnl">today</span></div>
       <img src="/assets/cathena-logo-160.png" class="dt-avatar" alt="Account">
     </div>
@@ -1032,7 +1032,7 @@ function ifRight(p) {
   return { pays: b.n, win: b.n - b.cost, text: `If BTC ${p.bull ? "≥" : "<"} $${fmtPx(p.target)} at 06:00` };
 }
 async function renderPositions() {
-  const list = await fetchPositions();
+  const got = await fetchPositions(), list = got && got.filter(p => p.status !== "failed");   // nothing filled: not a position
   if (!list) { $("posList").innerHTML = `<div class="card empty">Couldn't load positions.</div>`; return; }
   $("posMode").textContent = MODE === "live" ? "Live" : "Dry run";
   if (!list.length) { $("posList").innerHTML = `<div class="card empty">No positions yet. Dial a view and slide to stake.</div>`; return; }
@@ -1099,6 +1099,8 @@ function renderBook() {
 }
 document.querySelectorAll(".logo, .dt-logo").forEach(el => { el.title = "Your positions"; el.setAttribute("role", "button"); el.setAttribute("tabindex", "0");
   el.addEventListener("click", openBook); el.addEventListener("keydown", e => { if (e.key === "Enter") openBook(); }); });
+$("posHist").addEventListener("click", openBook);
+$("dHist").addEventListener("click", openBook);
 $("bkClose").addEventListener("click", () => { $("bookSheet").hidden = true; });
 $("bookSheet").addEventListener("click", e => { if (e.target.id === "bookSheet") $("bookSheet").hidden = true; });
 
