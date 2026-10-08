@@ -143,6 +143,12 @@ button { font: inherit; color: inherit; }
 .ptop { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .ptitle { font-family: var(--f-disp); font-weight: 700; font-size: 1.05rem; }
 .pnl { font-family: var(--f-disp); font-weight: 800; font-size: 1.6rem; letter-spacing: -.02em; text-align: right; }
+.bk-list { display: grid; gap: 8px; }
+.bk-row { background: var(--s2); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: grid; gap: 4px; }
+.bk-row .r1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-weight: 700; }
+.bk-row .r2 { font-family: var(--f-mono); font-size: .74rem; color: var(--ink2); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.bk-row .st { font-size: .7rem; font-weight: 600; color: var(--ink3); margin-left: 6px; }
+.logo, .dt-logo { cursor: pointer; }
 .kv { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .kv div { background: var(--s2); border-radius: 12px; padding: 9px 10px; display: grid; gap: 1px; min-width: 0; }
 .kv span { font-size: .7rem; color: var(--ink3); }
@@ -609,6 +615,13 @@ canvas.fx { position: fixed; inset: 0; pointer-events: none; z-index: 20; width:
     <div class="su-foot" id="suFoot"></div>
   </div>
 </div>
+<div class="sheet" id="bookSheet" hidden>
+  <div class="panel">
+    <div class="row"><div><div class="brand" style="font-size:1.2rem">Your positions</div><div class="sub" id="bkSub" style="font-size:.8rem"></div></div><button class="ghost" id="bkClose" style="padding:6px 12px">Close</button></div>
+    <div class="kv" id="bkKv"></div>
+    <div id="bkList" class="bk-list"></div>
+  </div>
+</div>
 <div class="sheet" id="cashSheet" hidden>
   <div class="panel">
     <div class="row"><div class="brand" id="cashH">Cash out</div><button class="ghost" id="cashClose" style="padding:6px 12px">Keep it</button></div>
@@ -1054,6 +1067,40 @@ function livePoll() {
     if (state.tab === "positions" && $("cashSheet").hidden) renderPositions(); else fetchPositions();
   }, 2000);
 }
+
+// ---------- your positions: tap the Cathena logo to see every position and its size ----------
+function sizeParts(p) {
+  const b = p.binary || {}, y = p.synthetic || {}, out = [];
+  if (b.n) out.push(`${b.n} ${p.bull ? "Yes" : "No"} @ ${(b.avg_px * 100).toFixed(2)}¢ · ${usd(b.cost, 2)}`);
+  if (y.units) out.push(`option ${y.units.toFixed(5)} BTC (≈ ${usd(y.units * y.strike)} of BTC) ${p.bull ? "call" : "put"} ${fmtPx(y.strike)}` + (p.status === "open" && y.held ? ` · perp ${Math.abs(y.held).toFixed(5)} BTC ${y.held > 0 ? "long" : "short"}${y.leverage ? " " + y.leverage + "×" : ""}` : ""));
+  return out.length ? out : ["nothing filled"];
+}
+async function openBook() {
+  $("bookSheet").hidden = false; renderBook();
+  await fetchPositions(); renderBook();
+}
+function renderBook() {
+  const all = (POS || []).filter(p => p.status !== "failed"), open = all.filter(p => p.status === "open");
+  const atRisk = open.reduce((a, p) => a + (p.max_loss ?? p.max_loss_quoted ?? 0), 0);
+  const nowVal = open.reduce((a, p) => a + (((p.mark || {}).cashout || {}).net_pnl || 0), 0);
+  const done = all.filter(p => p.status !== "open"), result = done.reduce((a, p) => a + (p.realized_pnl || 0), 0);
+  const staked = all.reduce((a, p) => a + ((p.binary || {}).cost || 0) + ((p.synthetic || {}).budget || 0), 0);
+  $("bkSub").textContent = all.length ? `${all.length} position${all.length > 1 ? "s" : ""} · ${open.length} live` : "";
+  $("bkKv").innerHTML = `<div><span>Live now</span><b>${open.length}</b></div><div><span>At risk now</span><b>${usd(atRisk, 2)}</b></div>
+    <div><span>Live, if cashed out</span><b class="${nowVal >= 0 ? "pos" : "neg"}">${open.length ? money(nowVal, 2) : "—"}</b></div><div><span>Closed result</span><b class="${result >= 0 ? "pos" : "neg"}">${done.length ? money(result, 2) : "—"}</b></div>
+    <div><span>Total put to work</span><b>${usd(staked, 2)}</b></div><div><span>Positions closed</span><b>${done.length}</b></div>`;
+  const when = ms => new Date(ms).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  $("bkList").innerHTML = all.length ? all.map(p => {
+    const open_ = p.status === "open", v = open_ ? (((p.mark || {}).cashout || {}).net_pnl || 0) : (p.realized_pnl || 0);
+    return `<div class="bk-row"><div class="r1"><span>${moodWord(p.s)}<span class="st">${STATUS[p.status] || p.status}${p.binary && p.binary.status === "partial" ? " · partly filled" : ""}</span></span>
+      <span class="${v >= 0 ? "pos" : "neg"}">${money(v, 2)}${open_ ? " now" : ""}</span></div>
+      <div class="r2"><span>${usd(p.stake)} stake</span>${sizeParts(p).map(x => `<span>${x}</span>`).join("")}<span>${when(p.created)}</span></div></div>`;
+  }).join("") : `<div class="sub" style="padding:8px">No positions yet.</div>`;
+}
+document.querySelectorAll(".logo, .dt-logo").forEach(el => { el.title = "Your positions"; el.setAttribute("role", "button"); el.setAttribute("tabindex", "0");
+  el.addEventListener("click", openBook); el.addEventListener("keydown", e => { if (e.key === "Enter") openBook(); }); });
+$("bkClose").addEventListener("click", () => { $("bookSheet").hidden = true; });
+$("bookSheet").addEventListener("click", e => { if (e.target.id === "bookSheet") $("bookSheet").hidden = true; });
 
 // ---------- cash-out sheet: see exactly what you get, slide to confirm ----------
 let cashId = null;
